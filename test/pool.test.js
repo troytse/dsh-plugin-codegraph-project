@@ -11,10 +11,10 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Pool } from '../lib/pool.js'
-import { fakeSubprocess } from './support/fake-subprocess.js'
+import { fakeSubprocess } from './fake-subprocess.js'
 import { ToolAggregate } from '../lib/agent-tools.js'
 
-const STUB = new URL('./support/stub-mcp-server.js', import.meta.url).pathname
+const STUB = new URL('./stub-mcp-server.js', import.meta.url).pathname
 
 /**
  * Project roots must exist before a child is spawned in them: a missing cwd makes

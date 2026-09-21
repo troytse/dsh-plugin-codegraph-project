@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # No lockfile is committed on purpose: the harness peers are published
+      # under the `next` dist-tag, and the ranges in package.json select them.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Cheap and dependency-free: catches a syntax error in a file no test
+      # happens to import (the manual scripts, for one).
+      - name: Syntax check
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test

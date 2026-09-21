@@ -10,6 +10,7 @@
   },
   "files": [
     "lib",
+    "scripts",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
@@ -17,9 +18,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "lint": "for f in lib/*.js test/*.test.js; do node --check \"$f\" || exit 1; done",
-    "probe": "node test/manual/stdio-probe.mjs"
+    "test": "node --test 'test/*.test.js'",
+    "lint": "for f in lib/*.js test/*.js scripts/*.mjs; do node --check \"$f\" || exit 1; done",
+    "probe": "node scripts/stdio-probe.mjs",
+    "e2e": "node scripts/real-codegraph-e2e.mjs"
   },
   "dsh": {
     "bundle": {
@@ -27,18 +29,17 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-scope": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
     "@deepseek-ai/dsh-subprocess": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
-    "@deepseek-ai/dsh-system-prompt": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
-    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20",
+    "dsh": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
   },
   "keywords": [
     "dsh",
@@ -57,5 +58,9 @@
   "bugs": {
     "url": "https://github.com/troytse/dsh-plugin-codegraph-project/issues"
   },
-  "homepage": "https://github.com/troytse/dsh-plugin-codegraph-project"
+  "homepage": "https://github.com/troytse/dsh-plugin-codegraph-project",
+  "devDependencies": {
+    "@deepseek-ai/dsh-scope": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
+  }
 }

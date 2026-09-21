@@ -1,11 +1,15 @@
 # dsh-plugin-codegraph-project
 
-[English](README.md) | 中文
+[English](README.md) | 中文 | [更新日志](CHANGELOG.md)
+
+[![npm](https://img.shields.io/npm/v/dsh-plugin-codegraph-project)](https://www.npmjs.com/package/dsh-plugin-codegraph-project)
+[![CI](https://github.com/troytse/dsh-plugin-codegraph-project/actions/workflows/ci.yml/badge.svg)](https://github.com/troytse/dsh-plugin-codegraph-project/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **让 CodeGraph 按项目工作。** 每个项目一个 CodeGraph MCP 服务，由 `npx` 启动，被该项目下所有
 > 会话共享；只有 workspace 真正有索引的会话才看得到它的工具。
 
-## 为什么需要它
+## 概述
 
 CodeGraph 本身很好用，但它的 MCP 服务有一个结构性限制：**从自己的进程工作目录**推断"当前项目"。
 所以现有的 DSH 集成都只能全局回答"是哪个项目"——托管一行 MCP、钉一个 `cwd`，换项目就改文件加
@@ -24,16 +28,21 @@ CodeGraph 本身很好用，但它的 MCP 服务有一个结构性限制：**从
 
 ## 安装
 
-```bash
-dsh plugin --profile <profile> add link:/path/to/dsh-plugin-codegraph-project
+```sh
+# 从 npm 安装
+dsh plugin --profile web add dsh-plugin-codegraph-project
+
+# 或本地检出
+dsh plugin --profile web add link:/path/to/dsh-plugin-codegraph-project
 ```
 
 然后重启该 profile（`dsh web`）。包内自带 bundle patch，会自己插入插件行，不需要手改组成文件。
-需要 Node.js 20 或更高版本。
+需要 Node.js 20 或更高版本，并且 DSH 部署提供 `@deepseek-ai/dsh-subprocess` 与
+`@deepseek-ai/dsh-tools`。
 
 除此之外不需要任何准备：服务通过 `npx` 拉到一个由本插件管理的缓存目录，不需要全局安装 CodeGraph。
 
-## 先给项目建索引
+## 快速开始
 
 建索引是**你的决定**，与上游一致——本插件绝不自己跑 `init`。需要 CodeGraph 的项目：
 
@@ -80,7 +89,7 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 `version` 作用于**下一次**项目连接。已经连上的会话保持它启动时的版本——在一个正在使用的会话里
 把服务换掉，会让正在被调用的工具凭空消失。重开该会话（或该项目的最后一个会话）即可切到新版本。
 
-## 模型看到什么
+### 模型看到什么
 
 每个项目连接一个工具，命名与 MCP 桥完全一致：
 
@@ -100,7 +109,7 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 会话已挂载时，`usageGuidance` 还会注入一小段指引，写明项目根与可用工具，并告诉模型优先用
 `codegraph_explore` 而不是 grep/read 循环。没有索引的会话不会拿到这段内容。
 
-## 行为细节
+## 工作方式
 
 - **没索引就没有 CodeGraph。** 判定标准是 `.codegraph/` 里存在 `*.db`，不是目录存在。这点很关键：
   CodeGraph 把自己的安装数据放在 `~/.codegraph`，长得像索引目录但不是项目。任何项目上线之前工具根本
@@ -116,7 +125,7 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 - **首次冷启动。** 某个版本第一次使用要下载平台包（几十 MB）。会话永远不会被它阻塞——连接就绪后
   工具才出现。`cliProbe` 会在启动时顺便预热同一个缓存。
 
-## 一个需要知道的平台限制
+### 按会话的工具列表（一个平台限制）
 
 本插件把工具定义注册在**根**工具注册表上，用守卫实现按会话的访问控制，而不是按会话注册。这是刻意
 的选择，也是这个约束的真实形态：DSH 的工具注册表支持 agent 作用域注册，但**模型的工具列表是用
@@ -129,7 +138,7 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 负责让没有索引的会话用不了它。如果 DSH 将来改为按 agent 的 scope key 组装模型工具列表，注册就可以移
 回 `agent.ctx`，列表也就真正是按会话的了。
 
-## 进程归属（不留孤儿）
+### 进程归属（不留孤儿）
 
 所有 CodeGraph 子进程都通过 `ctx.subprocess`（harness 的托管子进程服务）启动，而不是裸
 `child_process`，因此有四层清理：
@@ -142,7 +151,7 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 
 关闭 stdin 是首选路径——实测 CodeGraph 在 stdin EOF 后几毫秒内就退出；信号只是卡死时的兜底。
 
-## 排障
+## 诊断
 
 | 现象 | 原因与处理 |
 | --- | --- |
@@ -165,14 +174,30 @@ npm test          # 单元 + 集成测试，全部走 stub MCP 服务（不需�
 npm run lint      # 对每个源文件执行 node --check
 
 # 针对真实 CodeGraph 服务的手工验证（需要热缓存或网络）：
-node test/manual/real-codegraph-e2e.mjs --version 1.6.0
+node scripts/real-codegraph-e2e.mjs --version 1.6.0
                   # 多会话共享一个进程、中途建索引、进程回收
-node test/manual/stdio-probe.mjs /已建索引的项目路径 1.6.0
+node scripts/stdio-probe.mjs /已建索引的项目路径 1.6.0
                   # 原始 NDJSON 帧、并发调用、stdin EOF 拆卸
 ```
 
-测试套件用 stub MCP 服务替代真实服务，因此确定、离线；`test/manual/real-codegraph-e2e.mjs`
+运行时在 `lib/` 下：`locate.js`（项目索引解析）、`config.js`（行配置与 settings 命名空间）、
+`transport.js`（受管 stdio 传输）、`pool.js`（按项目共享与工具集同步）、`agent-tools.js`
+（工具注册与会话守卫）、`poll.js`（索引观察者）、`index.js`（插件装配）。
+
+测试套件用 stub MCP 服务替代真实服务，因此确定、离线；`scripts/real-codegraph-e2e.mjs`
 才是验证真实协议、真实查询、进程共享与进程回收的脚本，需要热缓存或网络。
+
+CI 在 Node.js 20、22、24 上跑 `npm run lint` 与 `npm test`。
+
+### 发布
+
+1. 在 `CHANGELOG.md` 里加一条 `## [<version>]`（用中文写）。发布工作流拒绝发布 changelog 里没有
+   记录的版本。
+2. `npm version <patch|minor|major>` 提交版本号并打 tag；推送提交与 tag。
+3. `.github/workflows/publish.yml` 会跑测试、校验 tag 与 `package.json` 一致、校验 changelog 条目，
+   然后通过 npm trusted publishing（OIDC）发布并附 provenance 证明，仓库里不保存长期 token。
+
+首次自动发布前，请先在 npm 上把 `publish.yml` 注册为该包的 trusted publisher。
 
 ## 许可
 

@@ -23,9 +23,9 @@ import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
 import systemPromptPlugin from '@deepseek-ai/dsh-system-prompt'
 import toolsPlugin from '@deepseek-ai/dsh-tools'
 import { apply as applyPlugin, Config } from '../lib/index.js'
-import { fakeSubprocess } from './support/fake-subprocess.js'
+import { fakeSubprocess } from './fake-subprocess.js'
 
-const STUB = new URL('./support/stub-mcp-server.js', import.meta.url).pathname
+const STUB = new URL('./stub-mcp-server.js', import.meta.url).pathname
 
 /** Create a project root, optionally already indexed. */
 function makeProject(t, { indexed }) {

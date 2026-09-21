@@ -1,12 +1,16 @@
 # dsh-plugin-codegraph-project
 
-[English](README.md) | 中文
+English | [中文](README.zh.md) | [Changelog (中文)](CHANGELOG.md)
+
+[![npm](https://img.shields.io/npm/v/dsh-plugin-codegraph-project)](https://www.npmjs.com/package/dsh-plugin-codegraph-project)
+[![CI](https://github.com/troytse/dsh-plugin-codegraph-project/actions/workflows/ci.yml/badge.svg)](https://github.com/troytse/dsh-plugin-codegraph-project/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **Project-scoped CodeGraph for DeepSeek Harness.** One CodeGraph MCP server per project,
 > launched through `npx`, shared by every session working in that project, and visible only
 > to sessions whose workspace actually has an index.
 
-## Why this exists
+## Summary
 
 CodeGraph is excellent and its MCP server has one structural limitation: it resolves "the
 project" from its own **process working directory**. Every existing DSH integration therefore
@@ -26,17 +30,22 @@ This plugin answers it per session instead:
 
 ## Install
 
-```bash
-dsh plugin --profile <profile> add link:/path/to/dsh-plugin-codegraph-project
+```sh
+# from npm
+dsh plugin --profile web add dsh-plugin-codegraph-project
+
+# or a local checkout
+dsh plugin --profile web add link:/path/to/dsh-plugin-codegraph-project
 ```
 
 Restart the profile afterwards (`dsh web`). The package ships a bundle patch, so it inserts
-its own row without any composition edit. Requires Node.js 20 or newer.
+its own row without any composition edit. Requires Node.js 20 or newer, together with a DSH
+deployment that provides `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-tools`.
 
 Nothing else is needed: the server is fetched through `npx` into a plugin-owned cache, so
 there is no global CodeGraph install to manage.
 
-## Index a project first
+## Quick start
 
 Indexing is **your** decision, exactly as upstream intends — this plugin never runs `init`
 by itself. For a project you want CodeGraph on:
@@ -87,7 +96,7 @@ settings edit is refused and the row configuration stays in force.
 version they started with — swapping the server under a live session would remove tools that
 are in use. Reopen the session (or the project's last session) to move it to the new version.
 
-## What the model sees
+### What the model sees
 
 One tool per project connection, named exactly as the MCP bridge would name it:
 
@@ -109,7 +118,7 @@ When a session is mounted, `usageGuidance` also injects a short section naming t
 root and the available tools, and tells the model to reach for `codegraph_explore` instead of
 a grep/read loop. A session without an index gets no such section.
 
-## Behaviour worth knowing
+## How it works
 
 - **No index, no CodeGraph.** The gate is a `*.db` inside `.codegraph/`, not the directory's
   existence. That matters: CodeGraph keeps its own installation data in `~/.codegraph`, which
@@ -133,7 +142,7 @@ a grep/read loop. A session without an index gets no such section.
   megabytes). Sessions are never blocked by it — the tools appear when the connection is
   ready. `cliProbe` warms the same cache at startup.
 
-## A platform limitation worth knowing
+### Per-session tool lists (a platform limitation)
 
 This plugin registers its tool definitions on the **root** tool registry and enforces
 per-session access with a guard, rather than registering per session. That is deliberate, and
@@ -151,7 +160,7 @@ for every session in the process, and the guard is what keeps a session without 
 using them. If DSH later assembles the model's tool list from the agent's scope key, the
 registration can move back to `agent.ctx` and the list becomes exactly per session.
 
-## Process ownership (no orphans)
+### Process ownership (no orphans)
 
 Every CodeGraph child is spawned through `ctx.subprocess` (the harness's managed-subprocess
 service) rather than a bare `child_process`, which buys four layers of cleanup:
@@ -167,7 +176,7 @@ service) rather than a bare `child_process`, which buys four layers of cleanup:
 Closing stdin is tried first, because CodeGraph exits within milliseconds of stdin EOF; the
 signals are the backstop for a wedged server.
 
-## Troubleshooting
+## Diagnostics
 
 | Symptom | Cause and fix |
 | --- | --- |
@@ -191,15 +200,35 @@ npm test          # unit + integration, all against a stub MCP server (no networ
 npm run lint      # node --check on every source file
 
 # Manual checks against the REAL CodeGraph server (need a warm npx cache or network):
-node test/manual/real-codegraph-e2e.mjs --version 1.6.0
+node scripts/real-codegraph-e2e.mjs --version 1.6.0
                   # share one process across sessions, index a project mid-flight, reap it
-node test/manual/stdio-probe.mjs /path/to/indexed/project 1.6.0
+node scripts/stdio-probe.mjs /path/to/indexed/project 1.6.0
                   # raw NDJSON framing, concurrent calls, stdin-EOF teardown
 ```
 
+The runtime lives in `lib/`: `locate.js` (project index resolution), `config.js` (row options
+and the settings namespace), `transport.js` (managed stdio transport), `pool.js` (per-project
+sharing and tool sync), `agent-tools.js` (tool registration and the session guard), `poll.js`
+(index watcher), and `index.js` (plugin wiring).
+
 The test suite substitutes a stub MCP server for the real one, so it is deterministic and
-offline; `test/manual/real-codegraph-e2e.mjs` is the script that verifies the real protocol,
+offline; `scripts/real-codegraph-e2e.mjs` is the script that verifies the real protocol,
 a real query, process sharing, and process reaping, and needs a warm npx cache or network.
+
+CI runs `npm run lint` and `npm test` on Node.js 20, 22, and 24.
+
+### Releasing
+
+1. Add a `## [<version>]` entry to `CHANGELOG.md` (written in Chinese). The publish workflow
+   refuses to ship a version the changelog does not document.
+2. `npm version <patch|minor|major>` commits the bump and creates the tag; push the commit and
+   the tag.
+3. `.github/workflows/publish.yml` then runs the tests, checks that the tag matches
+   `package.json`, checks the changelog entry, and publishes through npm trusted publishing
+   (OIDC) with a provenance attestation, so no long-lived token is stored in the repository.
+
+Register `publish.yml` as a trusted publisher on the package's npm settings page before the
+first automated release.
 
 ## License
 

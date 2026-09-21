@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ManagedStdioTransport, describeOutcome } from '../lib/transport.js'
-import { fakeSubprocess } from './support/fake-subprocess.js'
+import { fakeSubprocess } from './fake-subprocess.js'
 
 /** A scratch working directory for each spawned child. */
 function scratch(t) {
