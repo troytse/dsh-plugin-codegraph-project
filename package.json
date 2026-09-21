@@ -1,0 +1,61 @@
+{
+  "name": "dsh-plugin-codegraph-project",
+  "version": "0.1.0",
+  "description": "Project-scoped CodeGraph for DeepSeek Harness: launches codegraph's MCP server through npx, shares one instance per project root across sessions, selects the global codegraph version, and injects its tools only into workspaces that actually have an index — including workspaces initialized mid-session.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "for f in lib/*.js test/*.test.js; do node --check \"$f\" || exit 1; done",
+    "probe": "node test/manual/stdio-probe.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-scope": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
+    "@deepseek-ai/dsh-subprocess": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "codegraph",
+    "mcp",
+    "code-intelligence"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/troytse/dsh-plugin-codegraph-project.git"
+  },
+  "bugs": {
+    "url": "https://github.com/troytse/dsh-plugin-codegraph-project/issues"
+  },
+  "homepage": "https://github.com/troytse/dsh-plugin-codegraph-project"
+}

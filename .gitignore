@@ -1,0 +1,12 @@
+# Dependencies are never committed.
+#
+# Note: no trailing slash. This directory is usually a SYMLINK to the hosting
+# profile's dependency store (e.g. ~/.dsh/profiles/node_modules), and git treats
+# a symlink as a file — `node_modules/` would NOT match it.
+node_modules
+
+# Scratch and local state
+.debug/
+.preview/
+*.log
+.DS_Store

@@ -1,0 +1,10 @@
+# dsh-plugin-codegraph-project bundle patch: insert this plugin's single host row
+# into the profile lineup. It carries no id because it adds a new instance rather
+# than overriding an existing entry; the bundle owns one row and nothing else.
+#
+# Configuration knobs live on this row (see README): version, packageSpec,
+# cacheDir, serverName, toolCallTimeoutMs, pollIntervalMs, pollMaxMs, telemetry,
+# cliProbe, usageGuidance, diagnosticTool.
+- insert:
+    - id: codegraph-project
+      name: dsh-plugin-codegraph-project
