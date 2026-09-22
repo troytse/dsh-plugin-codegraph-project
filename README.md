@@ -227,8 +227,38 @@ CI runs `npm run lint` and `npm test` on Node.js 20, 22, and 24.
    `package.json`, checks the changelog entry, and publishes through npm trusted publishing
    (OIDC) with a provenance attestation, so no long-lived token is stored in the repository.
 
-Register `publish.yml` as a trusted publisher on the package's npm settings page before the
-first automated release.
+#### The very first release is manual
+
+Trusted publishing cannot create a package that does not exist yet — the trusted-publisher
+entry lives on the package's own settings page, so the package has to exist before the workflow
+can be authorized to publish it. The first version is therefore published once by hand, from a
+clean `main` checkout:
+
+```sh
+# 1. publish 0.1.0 from the laptop. `--provenance=false` is required: provenance is generated
+#    by CI, and `npm publish` refuses to attest from a local environment.
+npm publish --provenance=false --access public
+
+# 2. register the workflow as a trusted publisher (npm 11.15+; prompts for 2FA).
+#    The four values must match the workflow exactly.
+npm trust github dsh-plugin-codegraph-project \
+  --file publish.yml \
+  --repo troytse/dsh-plugin-codegraph-project \
+  --allow-publish -y
+```
+
+Every later release is fully automated by the workflow, with provenance. If a publish run
+fails after the tag was pushed, fix the commit, move the tag, and push it again:
+
+```sh
+git tag -f v<version> && git push --force origin refs/tags/v<version>
+```
+
+If GitHub does not start a run for a tag-object-only update, delete and recreate the remote tag
+(`git push origin :refs/tags/v<version>` then push it again).
+
+This local `npm publish` needs a writable npm cache. A root-owned `~/.npm` (a known npm bug)
+makes every npm command fail with `EPERM`; `sudo chown -R $(id -u):$(id -g) ~/.npm` fixes it.
 
 ## License
 

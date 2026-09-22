@@ -197,7 +197,36 @@ CI 在 Node.js 20、22、24 上跑 `npm run lint` 与 `npm test`。
 3. `.github/workflows/publish.yml` 会跑测试、校验 tag 与 `package.json` 一致、校验 changelog 条目，
    然后通过 npm trusted publishing（OIDC）发布并附 provenance 证明，仓库里不保存长期 token。
 
-首次自动发布前，请先在 npm 上把 `publish.yml` 注册为该包的 trusted publisher。
+#### 首个版本必须手动发布一次
+
+trusted publishing **无法创建尚不存在的包**——trusted publisher 条目就配在该包自己的设置页上，
+所以包必须先存在，工作流才可能被授权发布它。因此 0.1.0 由维护者在干净的 `main` 上手动发一次：
+
+```sh
+# 1. 在本机发布 0.1.0。`--provenance=false` 是必须的：provenance 由 CI 生成，
+#    本机 publish 会拒绝签发证明。
+npm publish --provenance=false --access public
+
+# 2. 把工作流注册为 trusted publisher（需 npm 11.15+，会要求 2FA）。
+#    四个值必须与工作流完全一致。
+npm trust github dsh-plugin-codegraph-project \
+  --file publish.yml \
+  --repo troytse/dsh-plugin-codegraph-project \
+  --allow-publish -y
+```
+
+此后的每个版本都由工作流全自动发布并带 provenance。如果 tag 推上去后发布失败：修好提交、
+移动 tag、重新推：
+
+```sh
+git tag -f v<version> && git push --force origin refs/tags/v<version>
+```
+
+若 GitHub 对"只更新 tag 对象"不触发新运行，就删掉远端 tag 再推一次
+（`git push origin :refs/tags/v<version>`）。
+
+本机 `npm publish` 需要可写的 npm 缓存。若 `~/.npm` 被 root 拥有（已知的 npm bug），所有 npm 命令
+都会以 `EPERM` 失败，用 `sudo chown -R $(id -u):$(id -g) ~/.npm` 修掉。
 
 ## 许可
 
