@@ -79,9 +79,11 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 | `cliProbe` | `true` | 启动时跑一次 `npx … version` 并记录结果，仅用于诊断。 |
 | `usageGuidance` | `true` | 只对已挂载的会话注入一小段 CodeGraph 用法指引。 |
 | `diagnosticTool` | `false` | 注册一个 `codegraph_project_status` 工具，报告本会话状态。 |
+| `allowHomeProject` | `false` | 允许把**就是**家目录（或文件系统根）的索引当作项目。相当于 CLI 的 `--force`；嵌套在家目录里的索引一直都会被正常服务。 |
 
 同样的子集也作为 DSH settings 命名空间 `codegraph-project` 暴露
-（`enabled`、`version`、`packageSpec`、`cacheDir`、`toolCallTimeoutMs`），**用户层优先于行配置**。
+（`enabled`、`version`、`packageSpec`、`cacheDir`、`toolCallTimeoutMs`、`allowHomeProject`），
+**用户层优先于行配置**。
 所有值在使用前都会校验：非法设置会被拒绝，行配置继续生效。
 
 ### 切换版本
@@ -111,10 +113,16 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 
 ## 工作方式
 
-- **没索引就没有 CodeGraph。** 判定标准是 `.codegraph/` 里存在 `*.db`，不是目录存在。这点很关键：
-  CodeGraph 把自己的安装数据放在 `~/.codegraph`，长得像索引目录但不是项目。任何项目上线之前工具根本
-  没有注册；一旦有项目上线，某个 workspace 没索引的会话仍然调不动它——守卫会拒绝，拒绝理由里写明该
-  workspace 与它对应的 `init` 命令。
+- **没索引就没有 CodeGraph。** 判定标准是 `.codegraph/` 里存在 `*.db`，不是目录存在：CodeGraph 把
+  运行态文件（`daemon.sock`、`codegraph.lock`、`telemetry*.json`）放在 `~/.codegraph`，只装这些的目录
+  不是项目。任何项目上线之前工具根本没有注册；一旦有项目上线，某个 workspace 没索引的会话仍然调不动
+  它——守卫会拒绝，拒绝理由里写明该 workspace 与它对应的 `init` 命令。
+- **家目录与文件系统根永远不算项目**，即使里面真的有一个索引。`~/.codegraph` 既是 CLI 的运行目录，也是
+  `codegraph init --force -- ~` 写入数据库的地方；没有这条规则，一个 `~/.codegraph/codegraph.db` 就会
+  成为 `$HOME` 下**每一个**会话的项目——工具会为一个谁都没建过索引的代码库提供出来。这与 CLI 一致：
+  它对家目录 `init` 会拒绝并提示需要 `--force`（原话是"it looks like your home directory"）。而嵌套在
+  家目录里的真实项目（`~/work/api`）仍由它自己的索引服务。把 `allowHomeProject: true` 设上，就相当于
+  插件的 `--force`。
 - **第一次请求可能赶在连接之前。** 会话的工具列表在每次模型请求开始时组装，而连接一个项目约需两秒
   （`cliProbe` 预热过缓存会更快）。交互式会话里这意味着你还没打完字工具就已经就绪；程序化驱动的会话
   可能需要在首个 prompt 前等挂载完成。插件会为每个项目挂载打一行日志，写明 pid 与工具名。

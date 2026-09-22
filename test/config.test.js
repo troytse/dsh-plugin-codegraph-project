@@ -30,6 +30,8 @@ test('row defaults are usable with no configuration at all', () => {
   assert.equal(config.cliProbe, true)
   assert.equal(config.usageGuidance, true)
   assert.equal(config.diagnosticTool, false)
+  // Off by default: the home directory is not a project unless the deployment says so.
+  assert.equal(config.allowHomeProject, false)
   assert.deepEqual(validateConfig(config), { ok: true })
 })
 
@@ -54,6 +56,12 @@ test('clearing packageSpec in settings restores the version-derived default', ()
   assert.equal(packageSpecFor(base.packageSpec, base.version), 'codegraph@1.4.0')
   const merged = resolveEffective(base, { packageSpec: '' })
   assert.equal(packageSpecFor(merged.packageSpec, merged.version), `${CODEGRAPH_PACKAGE}@1.5.0`)
+})
+
+test('a user layer can turn the home-directory refusal off live', () => {
+  // The settings-layer equivalent of the CLI's `--force`.
+  assert.equal(resolveEffective(new Config({}), { allowHomeProject: true }).allowHomeProject, true)
+  assert.equal(resolveEffective(new Config({ allowHomeProject: true }), {}).allowHomeProject, true)
 })
 
 test('a user layer can switch the feature off live', () => {

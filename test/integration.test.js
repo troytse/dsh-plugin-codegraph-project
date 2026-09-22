@@ -14,7 +14,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -27,9 +27,24 @@ import { fakeSubprocess } from './fake-subprocess.js'
 
 const STUB = new URL('./stub-mcp-server.js', import.meta.url).pathname
 
+/** Remove the stand-in home directory when this file's tests are done. */
+after(() => rmSync(FAKE_HOME, { recursive: true, force: true }))
+
+/**
+ * A stand-in home directory under which every scratch path lives.
+ *
+ * The plugin refuses an index AT the home directory, and it learns the home from the
+ * environment, so the test controls `HOME` to exercise that boundary the same way a real
+ * machine does. Setting it globally is deliberate: it keeps `protectedHomes()` consistent for
+ * every test in this file instead of only the one that changes it.
+ */
+const FAKE_HOME = mkdtempSync(join(tmpdir(), 'cgraph-home-'))
+process.env.HOME = FAKE_HOME
+process.env.USERPROFILE = FAKE_HOME
+
 /** Create a project root, optionally already indexed. */
 function makeProject(t, { indexed }) {
-  const base = mkdtempSync(join(tmpdir(), 'cgraph-int-'))
+  const base = mkdtempSync(join(FAKE_HOME, 'cgraph-int-'))
   const root = join(base, 'project')
   mkdirSync(root, { recursive: true })
   if (indexed) {
@@ -161,6 +176,67 @@ test('a workspace with no index starts no process and refuses CodeGraph calls', 
   assert.match(textOf(refused), /codegraph@stub init -y/)
   disposeAgent(h, session)
   disposeAgent(h, otherSession)
+})
+
+test('an index at the home directory never becomes every session\'s project', async (t) => {
+  // The bug this guards: a single `~/.codegraph/codegraph.db` made the home directory the
+  // project of every session underneath it, so CodeGraph was offered for a codebase nobody
+  // indexed. The walk must refuse the home root itself while still serving a real project
+  // nested inside it.
+  mkdirSync(join(FAKE_HOME, '.codegraph'), { recursive: true })
+  writeFileSync(join(FAKE_HOME, '.codegraph', 'codegraph.db'), '')
+  t.after(() => rmSync(join(FAKE_HOME, '.codegraph'), { recursive: true, force: true }))
+
+  const h = await harness(t)
+  // A session whose workspace is the home directory: refused, and nothing is spawned.
+  const atHome = createAgent(h, FAKE_HOME)
+  const below = join(FAKE_HOME, 'some', 'workspace')
+  mkdirSync(below, { recursive: true })
+  const under = createAgent(h, below)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(h.spawned.length, 0, 'the home index must not start a server')
+  assert.deepEqual(registeredTools(h), [], 'and must not register the tool')
+
+  // The refusal the model sees names the rule, so it does not look like a broken plugin.
+  // The refusal is only observable once some project is live (otherwise no tool is registered
+  // at all, which the assertion above already covers), so check it after the project mounts.
+
+
+  // A real project INSIDE the home directory still gets its own index served.
+  const project = join(FAKE_HOME, 'work', 'api')
+  mkdirSync(join(project, '.codegraph'), { recursive: true })
+  writeFileSync(join(project, '.codegraph', 'codegraph.db'), '')
+  const inProject = createAgent(h, project)
+  assert.ok(await waitFor(() => registeredTools(h).length === 1 && h.spawned.length === 1))
+  assert.equal(h.spawned[0].cwd, project)
+  assert.deepEqual(registeredTools(h), ['mcp__codegraph__codegraph_explore'])
+
+  // Now that a project exists, a session whose workspace resolves to the home index must still
+  // be refused, and the reason must name the rule rather than looking like a broken plugin.
+  const refused = await callTool(h, under.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+  assert.equal(refused.isError, true, 'a session that would inherit the home index must be refused')
+  assert.match(textOf(refused), /home directory/)
+  assert.match(textOf(refused), /allowHomeProject/)
+  disposeAgent(h, atHome)
+  disposeAgent(h, under)
+  disposeAgent(h, inProject)
+})
+
+test('allowHomeProject serves the home index when the deployment asks for it', async (t) => {
+  // The plugin-level counterpart of the CLI's --force. This is deliberately end-to-end rather
+  // than a unit check of locateIndex: the option name is plumbing, and a typo there would leave
+  // the documented escape hatch silently dead while every unit test still passed.
+  mkdirSync(join(FAKE_HOME, '.codegraph'), { recursive: true })
+  writeFileSync(join(FAKE_HOME, '.codegraph', 'codegraph.db'), '')
+  t.after(() => rmSync(join(FAKE_HOME, '.codegraph'), { recursive: true, force: true }))
+
+  const h = await harness(t, { allowHomeProject: true })
+  const session = createAgent(h, join(FAKE_HOME, 'some', 'workspace'))
+  assert.ok(await waitFor(() => registeredTools(h).length === 1 && h.spawned.length === 1), 'the home index must be served')
+  assert.equal(h.spawned[0].cwd, FAKE_HOME, 'and the server runs with the home directory as its cwd')
+  const result = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+  assert.equal(result.isError, false, 'and the session may call it')
+  disposeAgent(h, session)
 })
 
 test('an unindexed workspace directory that does not exist behaves the same', async (t) => {

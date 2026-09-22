@@ -4,6 +4,29 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-09-22
+
+### 修复
+
+- **家目录被当成项目（严重）**。判定规则原先是「向上找到第一个含 `*.db` 的 `.codegraph/` 即项目」。但 `~/.codegraph` 有**两种形态**且从内容上无法区分：它既是 CLI 的运行目录（`daemon.sock`、`codegraph.lock`、`telemetry*.json`），也是 `codegraph init --force -- ~` 写入 `codegraph.db` 的地方。于是只要家目录里存在一个 `codegraph.db`，`$HOME` 下**每一个**会话都会向上命中它，被挂载成一个谁都没打算建的「家目录项目」，工具也会为一个没建过索引的代码库提供出来。而家目录那种宽索引本身极易卡死（实测 `status` 超时，CLI 自己的看门狗每 60 秒杀一次）。
+  - 现新增规则：**家目录与文件系统根永远不算项目**，即使里面真的有索引。这与 CLI 一致——它对家目录 `init` 会直接拒绝（"Refusing to initialize in /Users/troy — it looks like your home directory … pass --force"）。
+  - 判定是**精确匹配解析出的项目根**，不是封禁整棵子树：嵌套在家目录里的真实项目（`~/work/api`）仍由它自己的索引正常服务。
+  - `allowHomeProject: true`（行配置与 settings 命名空间都支持）是插件的 `--force` 等价物。
+  - 拒绝会作为独立状态 `home-directory` 记录，守卫的拒绝文本与诊断工具都会说明原因并给出 `allowHomeProject` 出路，不会看起来像插件坏了。
+- **`allowHomeProject` 的接线错误**（在修复过程中自查发现）。`locateIndex` 的选项名是 `protectedHomes`，而调用处写成了 `{ protectedPaths: [] }`，导致文档里承诺的逃生口**静默失效**（单元测试直接调 `locateIndex` 所以看不出来）。已改为传 `{ allowHomeProject }`，并补了一条端到端测试锁住它（该测试在错误接线下会失败，已验证）。
+- **重复注册会话守卫**（自查发现）。守卫的注册块被整段复制了一次，同一个进程里装了两个功能相同的守卫。已删除重复块。
+
+### 文档
+
+- README 中英文修正了对 `~/.codegraph` 的错误描述（原先写成"CLI 安装目录、里面没有数据库"，这个前提不成立），并补充家目录/文件系统根规则与 `allowHomeProject` 配置项。
+- `.codegraph` 只含运行态文件（无数据库）的形态仍判为 `not-a-project`（原行为不变，测试保留）。
+
+### 验证
+
+- 单元测试新增 6 条：家目录索引被拒并给出原因、家目录下的真实项目仍被服务、`allowHomeProject` 生效、文件系统根被拒、`HOME=/` 的容器形态不会把所有路径都判成家目录、CLI 运行目录形态仍被拒。
+- 集成测试新增 2 条（真实 Cordis 运行时）：家目录索引不会成为每个会话的项目（不 spawn、不注册工具、守卫拒绝且文案含 `allowHomeProject`）、以及开启 `allowHomeProject` 后端到端可用。
+- 全套 77 项在 Node 20.20.2 / 22 / 24 上通过；`scripts/real-codegraph-e2e.mjs` 对真实 CodeGraph 1.6.0 全部通过（共享实例、中途建索引、关闭后回收，`ps` 残留为 0）。
+
 ## [0.1.0] - 2026-09-21
 
 ### 新增

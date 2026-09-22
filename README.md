@@ -84,10 +84,11 @@ Set these on the plugin row in your profile's `cordis.patch.yml` (or wherever th
 | `cliProbe` | `true` | Run `npx … version` once at startup and log the outcome. Diagnostics only. |
 | `usageGuidance` | `true` | Add a short CodeGraph section to the prompt of mounted sessions only. |
 | `diagnosticTool` | `false` | Register a `codegraph_project_status` tool reporting this session's state. |
+| `allowHomeProject` | `false` | Serve an index that **is** the home directory (or the filesystem root). The plugin's equivalent of the CLI's `--force`; an index nested in a home directory is always served. |
 
 The same subset is exposed as the DSH settings namespace `codegraph-project`
-(`enabled`, `version`, `packageSpec`, `cacheDir`, `toolCallTimeoutMs`), where the **user layer
-wins over the row configuration**. Everything is validated before it is used: an invalid
+(`enabled`, `version`, `packageSpec`, `cacheDir`, `toolCallTimeoutMs`, `allowHomeProject`), where
+the **user layer wins over the row configuration**. Everything is validated before it is used: an invalid
 settings edit is refused and the row configuration stays in force.
 
 ### Changing the version
@@ -121,10 +122,19 @@ a grep/read loop. A session without an index gets no such section.
 ## How it works
 
 - **No index, no CodeGraph.** The gate is a `*.db` inside `.codegraph/`, not the directory's
-  existence. That matters: CodeGraph keeps its own installation data in `~/.codegraph`, which
-  looks like an index directory but is not a project. Before any project is live the tool is not
-  registered at all; once one is, a session whose own workspace has no index still cannot call
-  it — the guard refuses, and the refusal names the workspace and the exact `init` command.
+  existence: CodeGraph keeps runtime files (`daemon.sock`, `codegraph.lock`, `telemetry*.json`)
+  in `~/.codegraph`, and a directory holding only those is not a project. Before any project is
+  live the tool is not registered at all; once one is, a session whose own workspace has no index
+  still cannot call it — the guard refuses, and the refusal names the workspace and the exact
+  `init` command.
+- **The home directory and the filesystem root are never projects**, even when they contain a
+  real index. `~/.codegraph` is both the CLI's runtime directory and the place
+  `codegraph init --force -- ~` writes its database, so without this rule a single
+  `~/.codegraph/codegraph.db` would become the project of *every* session under `$HOME` — and the
+  tool would be offered for a codebase nobody indexed. This mirrors the CLI, which refuses to
+  initialize the home directory without `--force` ("it looks like your home directory"). A real
+  project nested under `$HOME` (`~/work/api`) still gets served by its own index. Set
+  `allowHomeProject: true` for the plugin's equivalent of that `--force`.
 - **One request may precede the connection.** A session's tool list is assembled when a model
   request starts, and connecting a project takes about two seconds (faster with `cliProbe`
   having warmed the cache). In an interactive session that means the tool is there before you
