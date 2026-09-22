@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-codegraph-project",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Project-scoped CodeGraph for DeepSeek Harness: launches codegraph's MCP server through npx, shares one instance per project root across sessions, selects the global codegraph version, and injects its tools only into workspaces that actually have an index — including workspaces initialized mid-session.",
   "type": "module",
   "main": "lib/index.js",
