@@ -199,6 +199,10 @@ CI 在 Node.js 20、22、24 上跑 `npm run lint` 与 `npm test`。
 
 #### 首个版本必须手动发布一次
 
+唯一的前置条件是该包所属 npm 账号处于可用的登录状态：trusted publishing 授权的是**工作流**，但在有人
+用 npm 凭据发布过一次之前，包并不存在，什么都创建不了。`npm whoami` 必须能返回账号名；token 过期时它
+会以 `401 Unauthorized` 失败，而所有只读 npm 命令仍然正常——在怀疑包名被占用之前，先查这一点。
+
 trusted publishing **无法创建尚不存在的包**——trusted publisher 条目就配在该包自己的设置页上，
 所以包必须先存在，工作流才可能被授权发布它。因此 0.1.0 由维护者在干净的 `main` 上手动发一次：
 
@@ -225,8 +229,9 @@ git tag -f v<version> && git push --force origin refs/tags/v<version>
 若 GitHub 对"只更新 tag 对象"不触发新运行，就删掉远端 tag 再推一次
 （`git push origin :refs/tags/v<version>`）。
 
-本机 `npm publish` 需要可写的 npm 缓存。若 `~/.npm` 被 root 拥有（已知的 npm bug），所有 npm 命令
-都会以 `EPERM` 失败，用 `sudo chown -R $(id -u):$(id -g) ~/.npm` 修掉。
+请在普通终端里执行。若 shell 被沙箱限制为只能写项目目录（例如 `workspace-write` 文件策略下的 agent 会话），
+`npm login` 与 `npm publish` 会因 `~/.npm/_cacache` 的 `EPERM` 失败——那是文件策略拒绝了写入，不是 npm
+缓存坏了，不需要 `chown`。
 
 ## 许可
 

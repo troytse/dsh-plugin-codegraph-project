@@ -229,6 +229,12 @@ CI runs `npm run lint` and `npm test` on Node.js 20, 22, and 24.
 
 #### The very first release is manual
 
+The one precondition is a working npm login for the account that owns the package: trusted
+publishing authorizes the *workflow*, but nothing can create the package until a human with npm
+credentials has published it once. `npm whoami` must answer with the account's name; a token
+that has expired makes that fail with `401 Unauthorized` while every read-only npm command
+still works, which is worth checking before assuming the package name is the problem.
+
 Trusted publishing cannot create a package that does not exist yet — the trusted-publisher
 entry lives on the package's own settings page, so the package has to exist before the workflow
 can be authorized to publish it. The first version is therefore published once by hand, from a
@@ -257,8 +263,10 @@ git tag -f v<version> && git push --force origin refs/tags/v<version>
 If GitHub does not start a run for a tag-object-only update, delete and recreate the remote tag
 (`git push origin :refs/tags/v<version>` then push it again).
 
-This local `npm publish` needs a writable npm cache. A root-owned `~/.npm` (a known npm bug)
-makes every npm command fail with `EPERM`; `sudo chown -R $(id -u):$(id -g) ~/.npm` fixes it.
+Run these from a normal terminal. A sandboxed shell that denies writes outside the project
+(such as an agent session with `workspace-write` file policy) makes `npm login` and
+`npm publish` fail with `EPERM` on `~/.npm/_cacache` — that is the file policy refusing the
+write, not a broken npm cache, and no `chown` is needed.
 
 ## License
 
