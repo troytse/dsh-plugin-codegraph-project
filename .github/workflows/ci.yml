@@ -12,8 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Node.js 20 reached end-of-life in April 2026, and GitHub now forces the Node.js 20
+      # action runtime to Node.js 24 and warns on every job for it. The package still DECLARES
+      # `engines.node: ">=20"`, so `npm run lint` runs `scripts/check-node-compat.mjs` instead:
+      # it refuses APIs that do not exist on the declared minimum, which is the failure a CI leg
+      # on Node.js 20 used to catch (and did catch once, for `Promise.withResolvers`).
       matrix:
-        node-version: ['20', '22', '24']
+        node-version: ['22', '24']
     steps:
       - uses: actions/checkout@v4
 

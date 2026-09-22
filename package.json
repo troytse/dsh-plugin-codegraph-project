@@ -18,8 +18,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test 'test/*.test.js'",
-    "lint": "for f in lib/*.js test/*.js scripts/*.mjs; do node --check \"$f\" || exit 1; done",
+    "test": "node --test test/*.test.js",
+    "lint": "for f in lib/*.js test/*.js scripts/*.mjs; do node --check \"$f\" || exit 1; done && node scripts/check-node-compat.mjs",
     "probe": "node scripts/stdio-probe.mjs",
     "e2e": "node scripts/real-codegraph-e2e.mjs"
   },

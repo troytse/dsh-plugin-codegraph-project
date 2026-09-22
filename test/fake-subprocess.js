@@ -54,13 +54,26 @@ export function spawn(spec) {
     detached: process.platform !== 'win32',
   })
   const graceMs = spec.graceMs ?? 3_000
-  const outcome = Promise.withResolvers()
+  // Built by hand rather than `Promise.withResolvers`, which is Node.js 22+ and would make
+  // the suite unrunnable on the Node.js 20 the package claims to support.
+  let settle
+  let fail
+  let settled = false
+  const outcome = new Promise((resolve, reject) => {
+    settle = resolve
+    fail = reject
+  })
+  outcome.catch(() => {})
   let exited = false
   child.once('exit', (code, signal) => {
     exited = true
-    outcome.resolve({ exitCode: code, signal })
+    settled = true
+    settle({ exitCode: code, signal })
   })
-  child.once('error', (error) => outcome.reject(error))
+  child.once('error', (error) => {
+    settled = true
+    fail(error)
+  })
 
   const signalGroup = (signal) => {
     if (child.pid !== undefined && process.platform !== 'win32') {
@@ -79,17 +92,17 @@ export function spawn(spec) {
     stdout: child.stdout,
     stderr: child.stderr,
     collected: {},
-    done: outcome.promise,
+    done: outcome,
     terminate() {
       if (terminating || exited) return
       terminating = true
       signalGroup('SIGTERM')
       const timer = setTimeout(() => signalGroup('SIGKILL'), graceMs)
       if (typeof timer.unref === 'function') timer.unref()
-      outcome.promise.catch(() => {}).finally(() => clearTimeout(timer))
+      outcome.finally(() => clearTimeout(timer)).catch(() => {})
     },
     async waitForExit() {
-      if (!exited) await outcome.promise.catch(() => {})
+      if (!exited && !settled) await outcome.catch(() => {})
       return true
     },
   }
