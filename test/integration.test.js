@@ -217,6 +217,16 @@ test('an index at the home directory never becomes every session\'s project', as
   assert.equal(refused.isError, true, 'a session that would inherit the home index must be refused')
   assert.match(textOf(refused), /home directory/)
   assert.match(textOf(refused), /allowHomeProject/)
+  // The refused root is NOT the workspace, so the message must name the home directory as the
+  // reason — saying "this workspace IS the home directory" about $HOME/some/workspace is false.
+  const refusal = textOf(refused)
+  assert.match(refusal, /its project is the home directory/, 'the refusal must attribute the refusal to the project root')
+  assert.ok(refusal.includes(FAKE_HOME), 'and must name that root')
+  assert.equal(
+    refusal.includes(`${below} is the home directory`),
+    false,
+    'the workspace must never be presented as the home directory itself',
+  )
   disposeAgent(h, atHome)
   disposeAgent(h, under)
   disposeAgent(h, inProject)
@@ -236,6 +246,32 @@ test('allowHomeProject serves the home index when the deployment asks for it', a
   assert.equal(h.spawned[0].cwd, FAKE_HOME, 'and the server runs with the home directory as its cwd')
   const result = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
   assert.equal(result.isError, false, 'and the session may call it')
+  disposeAgent(h, session)
+})
+
+test('the watcher honours allowHomeProject when the index appears later', async (t) => {
+  // The mount path and the watcher path both resolve the workspace, and they must be given the
+  // SAME configuration. When they disagree, a deployment that set allowHomeProject waits forever
+  // on a home index created after the session opened — the escape hatch works only by accident,
+  // when the index happens to exist already. That is why this case is tested separately from the
+  // "index already present" one above.
+  rmSync(join(FAKE_HOME, '.codegraph'), { recursive: true, force: true })
+  const h = await harness(t, { allowHomeProject: true })
+  const session = createAgent(h, join(FAKE_HOME, 'late', 'workspace'))
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(h.spawned.length, 0, 'nothing to serve yet')
+  assert.equal(session.agent ? registeredTools(h).length : 0, 0)
+
+  // Now the index appears, exactly as `codegraph init --force -- ~` would create it.
+  mkdirSync(join(FAKE_HOME, '.codegraph'), { recursive: true })
+  writeFileSync(join(FAKE_HOME, '.codegraph', 'codegraph.db'), '')
+  t.after(() => rmSync(join(FAKE_HOME, '.codegraph'), { recursive: true, force: true }))
+
+  assert.ok(
+    await waitFor(() => registeredTools(h).length === 1 && h.spawned.length === 1),
+    'the watcher must pick up the home index that appeared after the session started',
+  )
+  assert.equal(h.spawned[0].cwd, FAKE_HOME)
   disposeAgent(h, session)
 })
 
@@ -344,5 +380,8 @@ test('the optional diagnostic tool registers and reports this session\'s state',
   assert.match(text, /liveInstances/)
   assert.match(text, /initHint/)
   assert.match(text, /"state": "mounted"/)
+  // The flag decides whether anything is served, so it belongs in the report a user is told to
+  // read when something looks wrong.
+  assert.match(text, /"allowHomeProject": false/)
   disposeAgent(h, session)
 })

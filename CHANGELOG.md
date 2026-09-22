@@ -4,6 +4,21 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.2] - 2026-09-22
+
+### 修复
+
+0.1.1 引入的家目录规则本身是对的，但一次针对它的对抗式复审发现三处问题，这一版全部修掉。复审同时确认了符号链接规范化、精确匹配语义、嵌套项目、`HOME=/` 容器形态、以及测试文件进程隔离这些点没有问题。
+
+- **`allowHomeProject` 在观察者路径上静默失效（严重）**。挂载路径 (`lib/index.js`) 把该开关传给了 `locateIndex`，但轮询路径 (`lib/poll.js` 的 `pollTick`) 没有传，于是两者在「会话建立时索引还不存在」的场景下判断相反：开启该开关的部署，若家目录索引是在会话**打开之后**才出现，会话会永远停在 `waiting`，观察者永不触发——而文档与拒绝文案都在告诉用户去设这个开关。现在开关由注册表以**读取器**形式贯穿到每次 tick（与 `pollIntervalMs`/`pollMaxMs` 同样的方式，所以设置改动对已运行的观察者也生效），并补了一条回归测试：已验证该测试在缺少接线的代码上会失败。
+- **拒绝文案把 workspace 说成家目录**。`mountRefusal` 用 `session.workspaceDir` 组织句子，而真正被拒绝的是解析出的项目根。于是 `$HOME/develop/others` 下的会话会被告知"该 workspace 就是家目录"——一句不成立的话，且 `session.projectRoot` 在被拒会话上是 `undefined`，真正的原因根没有任何地方保留。现在 `locateIndex` 在 `indexRoot` 里带上被拒绝的那个根，会话记录它，文案改为「其项目是家目录（<真实路径>）」；同时把建议改成两条可执行的出路（给具体项目建索引 / 设 `allowHomeProject`），原先那句 `<project root>` 占位符对家目录场景并不可执行。
+- **诊断工具漏报该开关**。`codegraph_project_status` 的 `configuration` 块列出了 version / packageSpec / cacheDir / serverName / pollIntervalMs，却没有列出 `allowHomeProject`——而它现在决定「有没有东西被服务」。已补上，`session` 块也一并给出 `refusedRoot`。
+- 修正 0.1.1 更新日志里「全套 77 项」的过时数字（当时实际已是 78 项）。
+
+### 升级须知
+
+0.1.1 起，**有意对家目录执行过 `codegraph init --force -- ~` 并依赖插件服务该索引的用户**，升级后会失去这个行为，直到设置 `allowHomeProject: true`。这是本次修复的预期语义（与 CLI 拒绝家目录的规则一致），拒绝文案里也点名了该开关；但它在补丁版本里是一次无条件的行为变更，特此说明。
+
 ## [0.1.1] - 2026-09-22
 
 ### 修复
