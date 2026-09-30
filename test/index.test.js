@@ -59,8 +59,18 @@ test('a CLI probe that outlives its deadline is terminated and reported', async 
     async resolveExecutable() { return '/fake/npx' },
     spawn() { return { done: new Promise(() => {}), terminate() { terminated = true } } },
   }
-  // `timeoutMs` is the seam that makes the 300s path testable without waiting 5 minutes.
-  await runCliProbe({ deps: { subprocess, env: {}, packageSpec: 'codegraph@1.0.0' }, logger, timeoutMs: 10 })
+  // The probe deliberately `unref()`s its own deadline — in production a real child
+  // process keeps the loop alive, so the deadline still fires. This fake handle keeps
+  // nothing alive, so an emptying event loop would drop the deadline timer before it
+  // fires (Node 22 does exactly that; Node 24 happened to stay alive for unrelated
+  // reasons). Hold the loop open ourselves, so the DEADLINE is what ends the probe.
+  const keepAlive = setTimeout(() => {}, 1_000)
+  try {
+    // `timeoutMs` is the seam that makes the 300s path testable without waiting 5 minutes.
+    await runCliProbe({ deps: { subprocess, env: {}, packageSpec: 'codegraph@1.0.0' }, logger, timeoutMs: 10 })
+  } finally {
+    clearTimeout(keepAlive)
+  }
   assert.equal(terminated, true, 'a probe past its deadline must be terminated')
   assert.match(messages.join('\n'), /timed out after 10ms/)
 })
