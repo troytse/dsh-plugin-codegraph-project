@@ -186,6 +186,90 @@ test('outcomes render readably for diagnostics', () => {
   assert.equal(describeOutcome(undefined), 'no outcome recorded')
 })
 
+test('a stdout line over the buffer cap is reported and closed instead of growing memory', async (t) => {
+  const cwd = scratch(t)
+  const flood = `
+process.stdout.write('x'.repeat(4096))
+process.stdin.resume()
+process.stdin.on('end', () => process.exit(0))
+`
+  const transport = new ManagedStdioTransport({
+    subprocess: fakeSubprocess,
+    argv: nodeArgv(flood),
+    cwd,
+    env: {},
+    graceMs: 200,
+    // A tiny cap stands in for the 8MiB production one, so the case is testable without
+    // allocating megabytes: the buffer only shrinks on a newline, so an unterminated line is
+    // the unbounded-growth path.
+    maxBufferBytes: 64,
+  })
+  const errors = []
+  transport.onerror = (error) => errors.push(error)
+  transport.launch()
+  assert.ok(await waitFor(() => errors.length === 1), 'the overflow must be reported')
+  assert.match(errors[0].message, /without a newline/)
+  assert.ok(await waitFor(() => transport.closed), 'and the connection must be closed')
+  await transport.close()
+})
+
+test('a stderr line over the cap is trimmed and never costs the connection', async (t) => {
+  const cwd = scratch(t)
+  const noisy = `
+process.stderr.write('e'.repeat(4096))
+process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 1, result: 'alive' }) + '\\n')
+process.stdin.resume()
+process.stdin.on('end', () => process.exit(0))
+`
+  const transport = new ManagedStdioTransport({
+    subprocess: fakeSubprocess,
+    argv: nodeArgv(noisy),
+    cwd,
+    env: {},
+    graceMs: 200,
+    maxBufferBytes: 64,
+  })
+  const received = []
+  transport.onmessage = (message) => received.push(message)
+  transport.launch()
+  assert.ok(await waitFor(() => received.length === 1), 'a flooded stderr must not break stdout framing')
+  assert.equal(transport.closed, false, 'verbose logging must not kill a working session')
+  assert.ok(transport.stderrBuffer.length <= 64, 'the unterminated stderr line must stay bounded')
+  assert.deepEqual(received.map((message) => message.result), ['alive'])
+  await transport.close()
+})
+
+test('concurrent close() callers all wait for the same completion', async (t) => {
+  const cwd = scratch(t)
+  const transport = new ManagedStdioTransport({
+    subprocess: fakeSubprocess,
+    argv: nodeArgv('setTimeout(() => process.exit(0), 60000)'),
+    cwd,
+    env: {},
+    graceMs: 200,
+  })
+  transport.launch()
+  const handle = transport.handle
+  const originalWait = handle.waitForExit.bind(handle)
+  let releaseGate
+  const gate = new Promise((resolve) => { releaseGate = resolve })
+  handle.waitForExit = async () => {
+    await gate
+    return originalWait()
+  }
+
+  const first = transport.close()
+  const second = transport.close()
+  let secondSettled = false
+  void second.then(() => { secondSettled = true })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(secondSettled, false, 'the second caller must await the first close, not be told "already closed"')
+  releaseGate()
+  await Promise.all([first, second])
+  assert.equal(secondSettled, true)
+  assert.equal(transport.closed, true)
+})
+
 /** Whether a pid is alive. */
 function isAlive(pid) {
   if (pid === undefined || pid === null) return false

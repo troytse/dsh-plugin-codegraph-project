@@ -87,9 +87,16 @@ Set these on the plugin row in your profile's `cordis.patch.yml` (or wherever th
 | `allowHomeProject` | `false` | Serve an index that **is** the home directory (or the filesystem root). The plugin's equivalent of the CLI's `--force`; an index nested in a home directory is always served. |
 
 The same subset is exposed as the DSH settings namespace `codegraph-project`
-(`enabled`, `version`, `packageSpec`, `cacheDir`, `toolCallTimeoutMs`, `allowHomeProject`), where
+(`version`, `packageSpec`, `cacheDir`, `toolCallTimeoutMs`, `allowHomeProject`), where
 the **user layer wins over the row configuration**. Everything is validated before it is used: an invalid
-settings edit is refused and the row configuration stays in force.
+settings edit is refused and the row configuration stays in force. `enabled` is deliberately **not** part
+of that layer: the row configuration's `enabled` is honored by the loader before the plugin runs, while a
+settings-layer switch could only ever be read once at activation — it could not turn a running plugin off.
+
+> **DSH 0.2.0 and later** no longer serve plugin-registered settings namespaces (`settings` exposes no
+> `register()`), so this layer is not offered there and the plugin logs one line saying so instead of
+> ignoring it silently. Configure the row instead — the same keys, in the profile's `cordis.patch.yml`,
+> which is the channel 0.2.0 uses for every plugin's settings.
 
 ### Changing the version
 

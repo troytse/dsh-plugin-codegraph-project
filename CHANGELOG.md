@@ -4,6 +4,29 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.3] - 2026-09-30
+
+这一版全部来自一次针对 **DSH 0.2.0 桌面版**的生产就绪复审：1 个阻塞、1 个严重、7 个中等，全部修复并各自配了回归测试（79 → 90 项）。
+
+### 修复
+
+- **行配置非法不再拖垮宿主（阻塞）**：`validateConfig` 失败原先直接 `throw`，而 loader 只按 `Config` schema 校验行配置——`toolCallTimeoutMs: 0`、`pollIntervalMs: 100`、`serverName: 'code.graph'` 这类「schema 放行、语义非法」的值会让该行变成**未激活**，桌面版随即判定启动失败并进入 profile 恢复流程（本轮实测过同类后果）。现在改为逐条 `logger.error` 后 `return`：拒绝服务，但不炸宿主，与 `enabled: false` 的既有早返回路径同风格。
+- **共享实例的引用不再被偷（严重）**：`Pool.acquire` 原先不 retain，refs 只统计「已挂载的会话」——于是「acquire 后、retain 前」的窗口（冷启动 npx 下载可达百秒）里，另一个会话被销毁时执行的 release 会扣掉**别人的**引用，把仍在服务的 hub 关掉并移出池：活着的会话此后永久 `the MCP connection is closed`，且 `reconnects=0` 没有自愈路径。现在 retain 并入 `acquire`（连接失败即释放），与 in-flight release 严格对称；`mountSession` 里多余的 `retain()` 已删除。
+- **工具集变化真正到达注册表**：`ProjectHub.subscribe()` 原先在生产代码里没有任何调用方（只有测试自己订阅），`tool-set-changed` 分支不可达，`session.release` 从未赋值。现在按 hub 订阅（每个 hub 恰好一个 listener）并在工具集变化时重建注册：服务端后加的工具立刻可用，被删除/改名的工具不再留下永远报错的旧注册。
+- **挂载失败不再是一次性的**：连接失败原先进入终态，一次瞬时抖动（冷下载、npm 缓存争用）就让该会话永久失去 CodeGraph。现在最多重试 3 次并复用**既有索引观察器**（不新增定时器，天然随 teardown 清理），拒绝文案区分「重试中 (N/M)」与「已放弃」。
+- **stdout/stderr 行缓冲有上限**：不换行的超大输出原先让缓冲无界增长。现在 `maxBufferBytes`（默认 8 MiB）**先消费完整帧再判上限**，避免「一个 chunk 含许多小帧」被误判。stdout 超限报错并关闭（协议流已损坏，继续读无意义）；stderr 超限只保留尾部、连接不变——进度条/verbose 日志用 `\r` 不换行是常见形态，为一条纯诊断流掐掉正在服务的会话不划算。
+- **未知行配置键不再静默忽略**：schemastery 的 `z.object` 不拒绝未知键，`toolCallTimeoutsMs` 这类拼写错误原先被原样保留、静默失效。现在由 `Config.dict` 得出声明键集合并逐键比对、点名报错（`argvBuilder` 作为文档化的测试缝显式放行）。
+- **并发 `close()` 会等待同一次回收**：`if (this.closed) return` 让第二个调用者拿到「已关闭」而不是「已回收完成」。transport 与 ProjectHub 现在都缓存 `closePromise`，后续调用返回同一 promise。
+- **0.2.0 的 settings 变化不再静默**：0.2.0 的 `dsh-settings` 已无 `register()`（只剩 `configure()`），插件原先静默跳过设置命名空间，而 README 仍承诺一个用户层。现在检测到「服务在但无 `register`」时打一条 info，说明 **0.2.0 起行配置是唯一通道**；README.md / README.zh.md 同步。
+- **设置层里那个从不生效的 `enabled` 已移除**：它只在激活时读一次，用户「关掉插件」后已挂载会话继续服务、新会话继续挂载。行配置的 `enabled` 才是 loader 级真开关（在 apply 之前生效），所以从用户层 schema 与文档中去掉，不再承诺一个不会生效的开关。
+
+### 验证
+
+- `node --check` 19 个文件通过；`node scripts/check-node-compat.mjs` 无可疑新 API；`node --test test/*.test.js` **90/90 通过**。
+- **两条依赖线都验证过**：本地 0.1.5 线与干净安装的 `0.2.0-rc.2` peer 线（CI 实际使用的解析结果）均 90/90。
+- refcount 修复用仓库外的复现脚本前后对比：修复前活会话调用失败（`reconnects=0`），修复后 `A call: OK` 且 hub 保持在池中。
+- 无 0.2.0 契约破坏：`tools.register(definition)`、`systemPrompt.section()`、`subprocess` 与 0.2.0 一致；本插件无客户端半边，不会因 pending 依赖卡住启动。
+
 ## [0.1.2] - 2026-09-22
 
 ### 修复

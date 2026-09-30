@@ -38,7 +38,7 @@ test('row defaults are usable with no configuration at all', () => {
 test('the settings schema leaves every field undefined when the user set nothing', () => {
   const resolved = new SettingsSchema({})
   assert.deepEqual(resolved, {})
-  for (const key of ['enabled', 'version', 'packageSpec', 'cacheDir', 'toolCallTimeoutMs']) {
+  for (const key of ['version', 'packageSpec', 'cacheDir', 'toolCallTimeoutMs', 'allowHomeProject']) {
     assert.equal(resolved[key], undefined)
   }
 })
@@ -64,8 +64,26 @@ test('a user layer can turn the home-directory refusal off live', () => {
   assert.equal(resolveEffective(new Config({ allowHomeProject: true }), {}).allowHomeProject, true)
 })
 
-test('a user layer can switch the feature off live', () => {
-  assert.equal(resolveEffective(new Config({}), { enabled: false }).enabled, false)
+test('the user layer cannot switch the feature off: only the row config owns `enabled`', () => {
+  // A user-layer `enabled` was read once at activation, so it could not switch a running plugin
+  // off — the control promised a live switch that did not exist. The row config's own `enabled`
+  // IS honored, by the loader, before apply() ever runs.
+  assert.equal(Object.hasOwn(SettingsSchema.dict ?? {}, 'enabled'), false)
+  assert.equal(resolveEffective(new Config({}), { enabled: false }).enabled, true)
+  assert.equal(resolveEffective(new Config({ enabled: false }), {}).enabled, false)
+})
+
+test('an unknown configuration key is refused instead of being silently ignored', () => {
+  // schemastery keeps unknown keys verbatim, so before this check a typo such as
+  // `toolCallTimeoutsMs` was accepted and did nothing at all.
+  const result = validateConfig(new Config({ toolCallTimeoutsMs: 1 }))
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /unknown configuration key "toolCallTimeoutsMs"/)
+  assert.match(result.errors.join('\n'), /accepted keys are/)
+})
+
+test('the documented argvBuilder test seam is not mistaken for an unknown key', () => {
+  assert.deepEqual(validateConfig(new Config({ argvBuilder: () => [] })), { ok: true })
 })
 
 test('package specs are built from the version unless one is given', () => {

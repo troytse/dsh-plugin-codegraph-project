@@ -127,9 +127,8 @@ test('two sessions in one project share a single child process', async (t) => {
   const aggregate = new ToolAggregate({ tools: registry, logger: silentLogger })
   await installFor(aggregate, first)
   await installFor(aggregate, second)
-  // Two sessions, one shared hub: both take a reference on it.
-  first.retain()
-  second.retain()
+  // Two sessions, one shared hub: `acquire` takes each session's reference BEFORE it awaits the
+  // connection, so the count is already 2 without the callers retaining anything themselves.
   assert.equal(first.refs, 2)
   assert.equal(pool.list().length, 1)
 
@@ -218,7 +217,10 @@ test('a server that dies before answering initialize is reported instead of hang
   await pool.closeAll()
 })
 
-test('a tool added later reaches sessions through the tool-set subscription', async (t) => {
+test('a tool added by a later listing reaches subscribers through resync()', async (t) => {
+  // The hub's own notification contract. The plugin's PRODUCTION wiring of it (one listener per
+  // hub, rebuilding the aggregate's registrations) is pinned end to end in integration.test.js;
+  // this test only fixes the contract that wiring relies on, so the two cannot drift apart.
   const [root] = scratchRoots(t, 1)
   const pool = new Pool(stubDeps({ env: { STUB_TOOLS: 'codegraph_explore', STUB_LIST_EXTRA: '1' } }))
   t.after(() => pool.closeAll())
@@ -243,6 +245,63 @@ test('a tool added later reaches sessions through the tool-set subscription', as
   const resolveRetain = await Promise.race([changed, new Promise((resolve) => setTimeout(() => resolve('timeout'), 5_000))])
   assert.notEqual(resolveRetain, 'timeout', 'a subscriber must observe the re-synced tool set')
   assert.deepEqual(aggregate.names().sort(), ['mcp__codegraph__codegraph_explore', 'mcp__codegraph__codegraph_node'])
+})
+
+test('an in-flight disposal cannot steal the reference a live session holds', async (t) => {
+  // The bug this guards: `Pool.acquire` used to leave the reference to a separate `retain()`
+  // call placed AFTER `await connect()`. A session disposed inside that window (a cold npx
+  // download takes seconds to minutes) then released a reference it had never taken, dropping
+  // the count to zero, closing the connection and evicting the hub — so a session that was
+  // mounted and serving kept failing with "the MCP connection is closed" and could not recover.
+  const [root] = scratchRoots(t, 1)
+  const pool = new Pool(stubDeps())
+  t.after(() => pool.closeAll())
+  const live = await pool.acquire(root)
+
+  // Session B starts mounting the same project and is disposed before its mount settles. The
+  // production order is acquire -> (await) -> disposal -> release.
+  const inFlight = await pool.acquire(root)
+  assert.equal(inFlight, live, 'the second session must join the live hub')
+  await pool.release(root)
+
+  assert.equal(live.refs, 1, 'the live session must still hold its own reference')
+  assert.equal(live.closed, false, 'and the shared connection must stay open')
+  assert.equal(pool.get(root), live, 'and the hub must stay in the pool')
+  const result = await live.call('codegraph_explore', { query: 'still-alive' }, {})
+  assert.match(result.content[0].text, /still-alive/)
+
+  // The reference B took is gone, so releasing the live session still ends the process.
+  await pool.release(root)
+  assert.equal(pool.list().length, 0)
+})
+
+test('close() waits for the process even when teardown and release overlap', async (t) => {
+  const [root] = scratchRoots(t, 1)
+  const pool = new Pool(stubDeps())
+  t.after(() => pool.closeAll())
+  const hub = await pool.acquire(root)
+
+  // Hold the transport's own close open, so "the second caller does not wait" is observable
+  // without a real slow process.
+  const transport = hub.transport
+  const originalClose = transport.close.bind(transport)
+  let releaseGate
+  const gate = new Promise((resolve) => { releaseGate = resolve })
+  transport.close = async () => {
+    await gate
+    return originalClose()
+  }
+
+  const first = hub.close()
+  const second = hub.close()
+  let secondSettled = false
+  void second.then(() => { secondSettled = true })
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(secondSettled, false, 'a concurrent close() must await the same completion')
+  releaseGate()
+  await Promise.all([first, second])
+  assert.equal(secondSettled, true)
+  assert.equal(hub.closed, true)
 })
 
 test('a list_changed notification triggers a re-sync on its own', async (t) => {

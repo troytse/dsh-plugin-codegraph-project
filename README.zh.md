@@ -82,9 +82,15 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 | `allowHomeProject` | `false` | 允许把**就是**家目录（或文件系统根）的索引当作项目。相当于 CLI 的 `--force`；嵌套在家目录里的索引一直都会被正常服务。 |
 
 同样的子集也作为 DSH settings 命名空间 `codegraph-project` 暴露
-（`enabled`、`version`、`packageSpec`、`cacheDir`、`toolCallTimeoutMs`、`allowHomeProject`），
+（`version`、`packageSpec`、`cacheDir`、`toolCallTimeoutMs`、`allowHomeProject`），
 **用户层优先于行配置**。
-所有值在使用前都会校验：非法设置会被拒绝，行配置继续生效。
+所有值在使用前都会校验：非法设置会被拒绝，行配置继续生效。`enabled` 刻意**不在**这一层里：
+行配置的 `enabled` 由 loader 在插件运行前就生效，而设置层的开关只会在激活时被读一次，
+并不能真的把一个正在跑的插件关掉。
+
+> **DSH 0.2.0 及以后**不再提供「插件可注册的设置命名空间」（`settings` 已没有 `register()`），
+> 因此该层在这些版本上不会出现，插件会打一行日志说明，而不是静默忽略。请改配行配置——同样的键，
+> 写在 profile 的 `cordis.patch.yml` 里，这也是 0.2.0 对每个插件设置使用的唯一通道。
 
 ### 切换版本
 

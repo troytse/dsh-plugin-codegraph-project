@@ -11,6 +11,9 @@
  *   STUB_CALL_DELAY  milliseconds to wait before answering a call (for cancellation tests)
  *   STUB_LIST_EXTRA  when set to `1`, the first tools/list hides `codegraph_node` and a
  *                    list_changed notification adds it
+ *   STUB_LIST_EXTRA_ON_CALL  when set to `1`, `codegraph_node` is hidden until the first
+ *                    tools/call, which then announces it — the deterministic shape for testing
+ *                    that a tool-set change reaches the registry of an ALREADY mounted session
  *   STUB_EXIT_AFTER_INIT  `1` exits right after initialize (crash-path tests)
  */
 
@@ -18,6 +21,7 @@ let toolNames = (process.env.STUB_TOOLS ?? 'codegraph_explore').split(',').filte
 const callMode = process.env.STUB_CALL_MODE ?? 'text'
 const callDelayMs = Number(process.env.STUB_CALL_DELAY ?? '0')
 const listExtra = process.env.STUB_LIST_EXTRA === '1'
+const listExtraOnCall = process.env.STUB_LIST_EXTRA_ON_CALL === '1'
 let extraPublished = false
 
 const buffer = { value: '' }
@@ -47,7 +51,7 @@ function toolResult(toolName, args) {
 /** The tool set currently advertised. */
 function advertisedTools() {
   const names = [...toolNames]
-  if (listExtra && extraPublished) return [...names, 'codegraph_node']
+  if ((listExtra || listExtraOnCall) && extraPublished) return [...names, 'codegraph_node']
   return names
 }
 
@@ -72,7 +76,7 @@ async function handle(message) {
         id: message.id,
         result: {
           protocolVersion: '2024-11-05',
-          capabilities: { tools: { listChanged: listExtra } },
+          capabilities: { tools: { listChanged: listExtra || listExtraOnCall } },
           serverInfo: { name: 'codegraph-stub', version: '0.0.0' },
           instructions: 'stub instructions',
         },
@@ -90,6 +94,12 @@ async function handle(message) {
       send({ jsonrpc: '2.0', id: message.id, result: { tools: advertisedTools().map(toolDescriptor) } })
       return
     }    case 'tools/call': {
+      // The first call publishes the extra tool: a change that lands after a session is already
+      // mounted, which is the shape the plugin's own tool-set listener must handle.
+      if (listExtraOnCall && !extraPublished) {
+        extraPublished = true
+        setTimeout(() => send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }), 10)
+      }
       if (callDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, callDelayMs))
       send({ jsonrpc: '2.0', id: message.id, result: toolResult(message.params?.name, message.params?.arguments) })
       return

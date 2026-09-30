@@ -366,6 +366,80 @@ test('a disabled plugin does nothing at all', async (t) => {
   disposeAgent(h, session)
 })
 
+test('an invalid configuration is refused without failing the plugin entry', async (t) => {
+  // The loader validates the row against the Config schema alone, so a value the schema admits but
+  // the plugin cannot serve (`toolCallTimeoutMs: 0` here) used to reach `throw` — which the loader
+  // reports as an entry that did not activate, and the desktop app escalates that into a refused
+  // boot plus a profile recovery flow. Refusing to serve is the correct severity, so this test
+  // asserts BOTH halves: nothing is served, and apply() returns instead of throwing.
+  const h = await harness(t, { toolCallTimeoutMs: 0 })
+  const root = makeProject(t, { indexed: true })
+  const session = createAgent(h, root)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.equal(h.spawned.length, 0, 'an invalid configuration must start no process')
+  assert.deepEqual(registeredTools(h), [], 'and register no tool')
+  disposeAgent(h, session)
+})
+
+test('an unknown configuration key is refused the same way', async (t) => {
+  // schemastery keeps unknown keys verbatim, so `toolCallTimeoutsMs` (one `s`) used to be accepted
+  // and silently do nothing.
+  const h = await harness(t, { toolCallTimeoutsMs: 1_000 })
+  const root = makeProject(t, { indexed: true })
+  const session = createAgent(h, root)
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assert.equal(h.spawned.length, 0)
+  assert.deepEqual(registeredTools(h), [])
+  disposeAgent(h, session)
+})
+
+test('a failed project connection is retried on the next index check', async (t) => {
+  let attempts = 0
+  const h = await harness(t, {
+    argvBuilder: () => {
+      attempts += 1
+      // The first start fails the way a transient npx/npm failure does; the retry works.
+      return attempts === 1 ? [process.execPath, '-e', 'process.exit(3)'] : [process.execPath, STUB]
+    },
+  })
+  const root = makeProject(t, { indexed: true })
+  const session = createAgent(h, root)
+  assert.ok(await waitFor(() => registeredTools(h).length === 1, 8_000), 'the retry must mount the project')
+  assert.equal(h.spawned.length, 2, 'the failed attempt plus the successful retry')
+  const result = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'retried' })
+  assert.equal(result.isError, false, 'and the session must be usable')
+  assert.match(textOf(result), /stub result for retried/)
+  disposeAgent(h, session)
+})
+
+test('a tool the server adds after a session is mounted reaches the registry', async (t) => {
+  // This is the PRODUCTION wiring, not a test-owned subscription: the plugin attaches one listener
+  // per hub, and that listener rebuilds the aggregate's registrations when the server changes its
+  // tool list. Before that wiring existed the listener API was dead code and a server upgrade
+  // never reached the model.
+  process.env.STUB_LIST_EXTRA_ON_CALL = '1'
+  t.after(() => { delete process.env.STUB_LIST_EXTRA_ON_CALL })
+  const h = await harness(t)
+  const root = makeProject(t, { indexed: true })
+  const session = createAgent(h, root)
+  assert.ok(await waitFor(() => registeredTools(h).length === 1), 'the initial tool set must register first')
+  assert.deepEqual(registeredTools(h), ['mcp__codegraph__codegraph_explore'])
+
+  // The first call makes the server publish an extra tool and announce it.
+  const before = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'before' })
+  assert.equal(before.isError, false, 'the mounted session must still work')
+
+  assert.ok(
+    await waitFor(() => registeredTools(h).includes('mcp__codegraph__codegraph_node')),
+    'the added tool must reach the registry without restarting anything',
+  )
+  assert.ok(
+    registeredTools(h).includes('mcp__codegraph__codegraph_explore'),
+    'and the tool that was already registered must stay',
+  )
+  disposeAgent(h, session)
+})
+
 test('the optional diagnostic tool registers and reports this session\'s state', async (t) => {
   // This tool is registered on the ROOT context, so it exercises the registry's own schema
   // validation directly — the one place a mistake in the schemas would abort plugin activation
