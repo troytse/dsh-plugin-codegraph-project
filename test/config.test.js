@@ -26,13 +26,23 @@ test('row defaults are usable with no configuration at all', () => {
   assert.equal(config.toolCallTimeoutMs, 60_000)
   assert.equal(config.pollIntervalMs, 3_000)
   assert.equal(config.pollMaxMs, 0)
-  assert.equal(config.telemetry, true)
-  assert.equal(config.cliProbe, true)
+  // Both are opt-in: an unset `telemetry` forwards nothing and lets CodeGraph read the user's
+  // own environment, and `cliProbe` stays off so no app start pays for an npx probe nobody asked
+  // for. See the row schema for the rationale.
+  assert.equal(config.telemetry, undefined)
+  assert.equal(config.cliProbe, false)
   assert.equal(config.usageGuidance, true)
   assert.equal(config.diagnosticTool, false)
   // Off by default: the home directory is not a project unless the deployment says so.
   assert.equal(config.allowHomeProject, false)
   assert.deepEqual(validateConfig(config), { ok: true })
+})
+
+test('telemetry and cliProbe are opt-in and pass through unchanged when the operator sets them', () => {
+  // An explicit `false` is a real preference (do not forward telemetry), just as `true` is.
+  assert.equal(new Config({ telemetry: false }).telemetry, false)
+  assert.equal(new Config({ telemetry: true }).telemetry, true)
+  assert.equal(new Config({ cliProbe: true }).cliProbe, true)
 })
 
 test('the settings schema leaves every field undefined when the user set nothing', () => {
@@ -108,6 +118,40 @@ test('a packageSpec that could be read as an npx flag is refused', () => {
   }
   for (const packageSpec of ['@scope/pkg', 'pkg@1.2.3', '@colbymchenry/codegraph@next', 'file:/tmp/pkg.tgz']) {
     assert.equal(validateConfig(new Config({ packageSpec })).ok, true, `expected ${packageSpec} to be accepted`)
+  }
+})
+
+test('a local packageSpec (file: / git+file:, any case) must be absolute', () => {
+  // `file:../../somewhere/pkg` passes the character whitelist but points at code outside the
+  // configured tree; only an absolute path is an explicit enough choice to execute. npm's own
+  // npa lower-cases the spec before deciding it is local, so `FILE:` and `git+file:` must be
+  // covered too, not just the exact `file:` spelling.
+  for (const packageSpec of [
+    'file:../elsewhere/pkg',
+    'file:./pkg',
+    'file:../../pkg.tgz',
+    'file:',
+    'FILE:../pkg',
+    'File:./pkg',
+    'git+file:../pkg',
+    'GIT+FILE:../../pkg',
+  ]) {
+    const result = validateConfig(new Config({ packageSpec }))
+    assert.equal(result.ok, false, `expected ${JSON.stringify(packageSpec)} to be refused`)
+  }
+  const relative = validateConfig(new Config({ packageSpec: 'git+file:../elsewhere/pkg' }))
+  assert.match(relative.errors.join('\n'), /git\+file: specs must be absolute/)
+  // The message echoes the operator's own spelling, not the normalized prefix used for lookup.
+  assert.match(
+    validateConfig(new Config({ packageSpec: 'FILE:../pkg' })).errors.join('\n'),
+    /uses a relative FILE: path; FILE: specs must be absolute/,
+  )
+  assert.match(
+    validateConfig(new Config({ packageSpec: 'GIT+FILE:../pkg' })).errors.join('\n'),
+    /GIT\+FILE: specs must be absolute/,
+  )
+  for (const packageSpec of ['file:/tmp/pkg.tgz', 'FILE:/tmp/pkg.tgz', 'git+file:/tmp/pkg', 'GIT+FILE:/tmp/pkg']) {
+    assert.equal(validateConfig(new Config({ packageSpec })).ok, true, `expected ${JSON.stringify(packageSpec)} to be accepted`)
   }
 })
 

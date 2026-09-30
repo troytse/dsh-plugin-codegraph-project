@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { IndexWatcher, IndexWatcherRegistry, pollTick } from '../lib/poll.js'
@@ -22,6 +22,31 @@ function scratch(t) {
 function indexAt(root) {
   mkdirSync(join(root, '.codegraph'), { recursive: true })
   writeFileSync(join(root, '.codegraph', 'codegraph.db'), '')
+}
+
+/**
+ * A scratch workspace whose `.codegraph/` exists but cannot be read. Access is restored before
+ * the tree is removed, so a failed assertion can never leave an undeletable directory behind.
+ *
+ * Returns `{ root, blocked }`; the caller must check readability (the test skips when the
+ * platform, or running as root, ignores the permission bits).
+ */
+function blockedScratch(t) {
+  const root = mkdtempSync(join(tmpdir(), 'cgraph-poll-blocked-'))
+  const blocked = join(root, '.codegraph')
+  mkdirSync(blocked, { recursive: true })
+  chmodSync(blocked, 0o000)
+  t.after(() => {
+    try { chmodSync(blocked, 0o700) } catch { /* already restored */ }
+    rmSync(root, { recursive: true, force: true })
+  })
+  return { root, blocked }
+}
+
+/** Whether a directory is actually unreadable in this environment. */
+function isUnreadable(path) {
+  try { readdirSync(path) } catch { return true }
+  return false
 }
 
 /** Wait until a predicate holds or the deadline passes. */
@@ -140,4 +165,66 @@ test('an index does not appear without one, and the watcher keeps waiting', asyn
   indexAt(root)
   assert.ok(await waitFor(() => seen.length === 1))
   registry.stopAll()
+})
+
+test('a watcher reports a real unreadable index directory once, and expires it under pollMaxMs', async (t) => {
+  // Driven through the PRODUCTION path: an actual `.codegraph/` with its read bit removed makes
+  // `locateIndex` return `index-unreadable`, so `pollTick` never throws. The watcher must still
+  // surface the reason once and bound the wait by the horizon.
+  const { root, blocked } = blockedScratch(t)
+  if (!isUnreadable(blocked)) {
+    t.skip('this environment (root, or a non-POSIX platform) cannot make a directory unreadable')
+    return
+  }
+  const errors = []
+  const expired = []
+  const watcher = new IndexWatcher({
+    workspaceDir: root,
+    intervalMs: 10,
+    maxMs: 50,
+    onIndexed: () => {},
+    onError: (error) => errors.push(String(error?.message ?? error)),
+    onExpired: (location) => expired.push(location),
+  })
+  watcher.start()
+  assert.ok(await waitFor(() => expired.length === 1), 'the unreadable path must be bounded by pollMaxMs')
+  assert.equal(watcher.active, false)
+  assert.equal(errors.length, 1, 'the same unreadable reason is reported once, not every interval')
+  assert.match(errors[0], /EACCES|permission/i)
+  assert.equal(expired[0]?.stopReason, 'index-unreadable')
+  assert.match(String(expired[0]?.error), /EACCES|permission/i)
+})
+
+test('an unreadable reason is reported again after a clean tick resets the dedup', async (t) => {
+  const { root, blocked } = blockedScratch(t)
+  if (!isUnreadable(blocked)) {
+    t.skip('this environment (root, or a non-POSIX platform) cannot make a directory unreadable')
+    return
+  }
+  const errors = []
+  // OBSERVABLE clean ticks, not a sleep: the watcher reports every resolved location, so the
+  // test waits until it has actually processed the now-readable directory before re-breaking it.
+  // A fixed delay could pass under load without a single tick having run, silently swallowing
+  // the second report through the dedup.
+  const cleanTicks = []
+  const watcher = new IndexWatcher({
+    workspaceDir: root,
+    intervalMs: 10,
+    maxMs: 0,
+    onIndexed: () => {},
+    onError: (error) => errors.push(String(error?.message ?? error)),
+    onTick: (location) => {
+      if (location?.stopReason !== 'index-unreadable') cleanTicks.push(location?.stopReason)
+    },
+  })
+  watcher.start()
+  assert.ok(await waitFor(() => errors.length === 1))
+  // Make the directory readable but still empty: the next tick is a CLEAN wait, which resets the
+  // dedup key, so the same failure later is a new event and must be reported again.
+  chmodSync(blocked, 0o700)
+  assert.ok(await waitFor(() => cleanTicks.length >= 1), 'the watcher must process the readable directory')
+  chmodSync(blocked, 0o000)
+  assert.ok(await waitFor(() => errors.length === 2), 'a failure after a clean tick is reported afresh')
+  watcher.stop()
+  assert.equal(errors.length, 2)
 })

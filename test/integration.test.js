@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict'
 import { after, test } from 'node:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -458,4 +458,108 @@ test('the optional diagnostic tool registers and reports this session\'s state',
   // read when something looks wrong.
   assert.match(text, /"allowHomeProject": false/)
   disposeAgent(h, session)
+})
+
+test('the CLI probe is opt-in: it does not run at activation unless the row asks', async (t) => {
+  // The activation-time probe is what item 1 turned off by default, so this pins the row gate
+  // itself rather than the probe's internals.
+  const off = await harness(t)
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  assert.equal(off.spawned.length, 0, 'the default row must not probe at activation')
+
+  const on = await harness(t, { cliProbe: true })
+  assert.ok(await waitFor(() => on.spawned.length >= 1), 'cliProbe: true must run the probe')
+  assert.deepEqual(on.spawned[0].argv.slice(1), ['-y', 'codegraph-stub@0.0.0', 'version'])
+  assert.equal(on.spawned.length, 1, 'the probe is the only process a probe-only activation starts')
+})
+
+test('an unreadable index directory is refused as unreadable, and that refusal clears once fixed', async (t) => {
+  const h = await harness(t)
+
+  const blockedRoot = makeProject(t, { indexed: false })
+  const blocked = join(blockedRoot, '.codegraph')
+  mkdirSync(blocked, { recursive: true })
+  chmodSync(blocked, 0o000)
+
+  let unreadable = false
+  try { readdirSync(blocked) } catch { unreadable = true }
+  if (!unreadable) {
+    chmodSync(blocked, 0o700)
+    t.skip('this environment (root, or a non-POSIX platform) cannot make a directory unreadable')
+    return
+  }
+
+  // The live project is created ONLY after the capability check above: a `t.skip()` must not
+  // leave a mounted child process behind, because that keeps the whole file's event loop alive.
+  const live = makeProject(t, { indexed: true })
+  const liveSession = createAgent(h, live)
+  assert.ok(await waitFor(() => registeredTools(h).length === 1))
+
+  const session = createAgent(h, blockedRoot)
+  try {
+    const first = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+    assert.equal(first.isError, true)
+    const firstText = textOf(first)
+    assert.match(firstText, /could not be read/, 'the refusal must name the unreadable index, not "no index"')
+    assert.match(firstText, /ancestor project's index/)
+    assert.ok(firstText.includes(blockedRoot) && firstText.includes('.codegraph'), 'and must name the exact directory')
+
+    // Fix the directory (still no index inside). The watcher's next tick must clear the cached
+    // diagnosis, so the refusal stops claiming an unreadable index the user has already fixed.
+    chmodSync(blocked, 0o700)
+    let secondText
+    assert.ok(
+      await waitFor(async () => {
+        const next = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+        secondText = textOf(next)
+        return !/could not be read/.test(secondText)
+      }, 4_000),
+      'the stale unreadable refusal must clear after the directory is fixed',
+    )
+    assert.match(secondText, /no CodeGraph index exists/)
+  } finally {
+    // Always restore access and release both sessions, even when an assertion failed: a live
+    // hub keeps a child process alive and would otherwise hang the whole test file.
+    chmodSync(blocked, 0o700)
+    disposeAgent(h, session)
+    disposeAgent(h, liveSession)
+  }
+})
+
+test('after pollMaxMs expiry the refusal asks for a reopen, and a late index is not picked up', async (t) => {
+  // The give-up horizon is a real boundary: once the watcher stops, an index created afterwards
+  // is NOT enabled live, and the refusal must say so instead of promising "within a few seconds".
+  const h = await harness(t, { pollIntervalMs: 250, pollMaxMs: 100 })
+  const live = makeProject(t, { indexed: true })
+  const liveSession = createAgent(h, live)
+  assert.ok(await waitFor(() => registeredTools(h).length === 1))
+
+  const root = makeProject(t, { indexed: false })
+  const session = createAgent(h, root)
+  try {
+    // The first tick lands at 250ms, by which time the 100ms horizon has already passed.
+    let expiredText
+    assert.ok(
+      await waitFor(async () => {
+        const refused = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+        expiredText = textOf(refused)
+        return /stopped watching for one/.test(expiredText)
+      }, 4_000),
+      'the session must reach waiting-expired',
+    )
+    assert.match(expiredText, /reopen the session/)
+
+    // Indexing now must change nothing: the watcher was stopped by pollMaxMs.
+    const spawnedBefore = h.spawned.length
+    mkdirSync(join(root, '.codegraph'), { recursive: true })
+    writeFileSync(join(root, '.codegraph', 'codegraph.db'), '')
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const after = await callTool(h, session.agent, 'mcp__codegraph__codegraph_explore', { query: 'x' })
+    assert.equal(after.isError, true, 'a late index must not be served after the watcher gave up')
+    assert.match(textOf(after), /reopen the session/)
+    assert.equal(h.spawned.length, spawnedBefore, 'no server may start after the watcher gave up')
+  } finally {
+    disposeAgent(h, session)
+    disposeAgent(h, liveSession)
+  }
 })

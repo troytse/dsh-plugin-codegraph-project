@@ -28,6 +28,18 @@ CodeGraph 本身很好用，但它的 MCP 服务有一个结构性限制：**从
 
 ## 安装
 
+**桌面版（DSH 桌面 App）**——在 App 侧栏的 **Plugins** 页里安装：粘包名即从 npm 拉取，粘**绝对路径**则安装本地检出。
+
+```
+dsh-plugin-codegraph-project
+# 或本地检出
+/path/to/dsh-plugin-codegraph-project
+```
+
+`desktop` 这个 profile 归 App 独占——`dsh plugin --profile desktop …` 会被明确拒绝（`profile "desktop" is managed exclusively by the Electron application`），所以桌面版走 Plugins 页。它会安装包、把 bundle 追加进 profile，随后该行会出现在设置页的清单里。宿主侧的行会即时加载；客户端界面需要刷新一次页面才会出现。
+
+**命令行 profile（`dsh web`、TUI、headless）**——按名字装进对应 profile，或 link 一个检出：
+
 ```sh
 # 从 npm 安装
 dsh plugin --profile web add dsh-plugin-codegraph-project
@@ -40,6 +52,8 @@ dsh plugin --profile web add link:/path/to/dsh-plugin-codegraph-project
 需要 Node.js 20 或更高版本，并且 DSH 部署提供 `@deepseek-ai/dsh-subprocess` 与
 `@deepseek-ai/dsh-tools`。
 
+**两条依赖线都支持**：**0.1.5** 线上由宿主 settings namespace 在本行之上叠一层用户覆盖；**0.2.0** 线上该 namespace 根本注册不了——0.2.0 移除了插件可注册的设置命名空间——本行的 `config` 是唯一设置通道（插件会打一行日志说明，见[配置](#配置)）。
+
 除此之外不需要任何准备：服务通过 `npx` 拉到一个由本插件管理的缓存目录，不需要全局安装 CodeGraph。
 
 ## 快速开始
@@ -51,7 +65,8 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 ```
 
 它只会在项目里创建 `.codegraph/codegraph.db`，不动源码。会话开着时执行，几秒内工具就会出现；
-先建好再开会话，会话一开始就带着工具。
+先建好再开会话，会话一开始就带着工具。（这条「实时出现」以默认 `pollMaxMs: 0` 为前提；若设了正的
+`pollMaxMs`，超过该时限后才建的索引需要重开会话。）
 
 `codegraph uninit -- /path/to/project` 可撤销。
 
@@ -69,14 +84,14 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 | --- | --- | --- |
 | `enabled` | `true` | 总开关。关掉后不 spawn、不注册任何工具。 |
 | `version` | `'1.6.0'` | **全局使用的 CodeGraph 版本**，以 `@colbymchenry/codegraph@<version>` 交给 npx。默认值是本插件实测过的版本。 |
-| `packageSpec` | `''` | 逃生口：完整包规格，优先于 `version`（镜像源、私有 registry、`file:` tarball）。 |
+| `packageSpec` | `''` | 逃生口：完整包规格，优先于 `version`（镜像源、私有 registry、`file:` tarball）。**npx 会加载并执行它指向的代码**，因此本地 `file:`/`git+file:` 形式必须是绝对路径。 |
 | `cacheDir` | `''` → `~/.dsh/codegraph/npm-cache` | npx 使用的 npm 缓存目录，不存在会创建。DSH 的 `~/.npm` 不可写时改这里。 |
 | `serverName` | `'codegraph'` | MCP 命名空间，模型看到的工具名是 `mcp__<serverName>__codegraph_explore`。 |
 | `toolCallTimeoutMs` | `60000` | 单次查询的超时。 |
 | `pollIntervalMs` | `3000` | 未索引 workspace 的检查间隔。 |
 | `pollMaxMs` | `0` | 超过这个时长就放弃观察未索引的 workspace；`0` = 整个会话周期都观察。 |
-| `telemetry` | `true` | 通过 `CODEGRAPH_TELEMETRY` 转达你的偏好，本插件不替你改。 |
-| `cliProbe` | `true` | 启动时跑一次 `npx … version` 并记录结果，仅用于诊断。 |
+| `telemetry` | 未设置 | 只有**显式**配置时才通过 `CODEGRAPH_TELEMETRY` 转达（`true` → `1`，`false` → `0`）。未设置时不注入任何值，由 CodeGraph 按用户自己的环境决定；插件不会自作主张开或关遥测。 |
+| `cliProbe` | `false` | 启动时跑一次 `npx … version` 并记录结果，顺带预热 npx 缓存。**默认关**：它会在每次 App 启动都执行，即使根本没人用 CodeGraph；冷缓存时它会一边下载平台包，一边和首个会话自己的 npx 启动争抢同一个缓存。确认这份诊断值这个成本时再打开。 |
 | `usageGuidance` | `true` | 只对已挂载的会话注入一小段 CodeGraph 用法指引。 |
 | `diagnosticTool` | `false` | 注册一个 `codegraph_project_status` 工具，报告本会话状态。 |
 | `allowHomeProject` | `false` | 允许把**就是**家目录（或文件系统根）的索引当作项目。相当于 CLI 的 `--force`；嵌套在家目录里的索引一直都会被正常服务。 |
@@ -88,8 +103,9 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 行配置的 `enabled` 由 loader 在插件运行前就生效，而设置层的开关只会在激活时被读一次，
 并不能真的把一个正在跑的插件关掉。
 
-> **DSH 0.2.0 及以后**不再提供「插件可注册的设置命名空间」（`settings` 已没有 `register()`），
-> 因此该层在这些版本上不会出现，插件会打一行日志说明，而不是静默忽略。请改配行配置——同样的键，
+> **DSH 0.2.0 及以后**不再提供「插件可注册的设置命名空间」。当某个 build 仍然暴露 `settings` 服务、
+> 但它没有 `register()` 时，插件会打一行日志说明，而不是静默忽略这一层。（如果该 build 完全没有
+> `settings` 服务，则该层与这行日志都不会出现。）请改配行配置——同样的键，
 > 写在 profile 的 `cordis.patch.yml` 里，这也是 0.2.0 对每个插件设置使用的唯一通道。
 
 ### 切换版本
@@ -130,14 +146,15 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
   家目录里的真实项目（`~/work/api`）仍由它自己的索引服务。把 `allowHomeProject: true` 设上，就相当于
   插件的 `--force`。
 - **第一次请求可能赶在连接之前。** 会话的工具列表在每次模型请求开始时组装，而连接一个项目约需两秒
-  （`cliProbe` 预热过缓存会更快）。交互式会话里这意味着你还没打完字工具就已经就绪；程序化驱动的会话
+  （可选的 `cliProbe` 预热过缓存会更快）。交互式会话里这意味着你还没打完字工具就已经就绪；程序化驱动的会话
   可能需要在首个 prompt 前等挂载完成。插件会为每个项目挂载打一行日志，写明 pid 与工具名。
 - **向上解析。** monorepo 里 `packages/app` 下的会话由仓库根的索引服务，服务进程的 `cwd` 就是那个根。
 - **每个项目一个进程。** 同项目的第二个会话接入已有服务；最后一个会话释放时进程才停止。
 - **动态注入。** 稍后出现的索引由轮询发现，工具会注册进**正在运行的会话**的作用域。
 - **断线自愈。** 服务崩了，下一次工具调用会透明重连；重连失败会作为工具错误返回，而不是假装成功。
 - **首次冷启动。** 某个版本第一次使用要下载平台包（几十 MB）。会话永远不会被它阻塞——连接就绪后
-  工具才出现。`cliProbe` 会在启动时顺便预热同一个缓存。
+  工具才出现。把 `cliProbe` 设为 `true` 可在启动时顺便预热同一个缓存；它默认是关的，免得每次 App 启动
+  都为一次没人要的下载买单（还和首个会话争抢同一个缓存）。
 
 ### 按会话的工具列表（一个平台限制）
 
@@ -174,6 +191,8 @@ export CODEGRAPH_MCP_TOOLS=explore,node,search,callers
 | 日志 `could not resolve an npm launcher` | harness 的 `PATH` 里没有 `npx`。从有 Node 的终端启动 DSH，或把 `packageSpec` 指向仍可拉取的规格。 |
 | 日志 `could not create the npx cache directory` | `cacheDir` 不可写，换一个可写目录。 |
 | 日志里出现 `manifest`/下载错误 | npm 拉不到平台包（离线、镜像缺平台包、私有 registry）。把 `packageSpec` 指向可达来源。 |
+| 日志 `cannot read <root>/.codegraph` | `.codegraph` 条目存在但不是可读目录：`EACCES`/`EIO`、断链符号链接（`ENOENT`）、指向非目录的链接、或普通文件（`ENOTDIR`）。插件会停止向上认领，而不是去服务祖先项目的索引。修好权限或链接后观察者会自动接手。 |
+| 日志 `could not register mcp__<serverName>__…` | **通常**是另一个 MCP 服务已占用该命名空间（`serverName` 非法等也可能导致注册失败），插件会静默地失去全部工具。给 `codegraph-project` 行换一个 `serverName`（或移除冲突的服务）后重开会话。 |
 | 工具调用返回 "the MCP server is not responding" | 服务崩溃且重连失败。日志里有捕获的 stderr 尾部。 |
 | 会话还在用旧版本 | 会话保持连接时的版本，重开会话即可。 |
 | 私有 registry 需要凭据 | harness 会把凭据类环境变量从子进程中清洗掉。请改用预热的缓存目录，或 `file:`/tarball 形式的 `packageSpec`。 |

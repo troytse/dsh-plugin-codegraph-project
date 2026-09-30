@@ -182,6 +182,25 @@ test('release unregisters the tools once the last project lets go, and is idempo
   assert.equal(registry.registered.size, 0)
 })
 
+test('a registration failure names the likely namespace conflict and how to fix it', () => {
+  // The realistic cause: a host MCP client (or a second row) already owns `codegraph`, so every
+  // `mcp__codegraph__*` name collides and the plugin silently ends up with no tools at all. A
+  // bare error line would leave the operator with no next step.
+  const messages = []
+  const logger = { info: () => {}, debug: () => {}, warn: () => {}, error: (message) => messages.push(message) }
+  const registry = {
+    register() { throw new Error('tool "mcp__codegraph__codegraph_explore" is already registered') },
+  }
+  const aggregate = new ToolAggregate({ tools: registry, logger })
+  aggregate.retain(fakeHub())
+  const text = messages.join('\n')
+  assert.equal(aggregate.names().length, 0, 'a failed registration leaves no tool behind')
+  assert.match(text, /could not register mcp__codegraph__codegraph_explore/)
+  assert.match(text, /already registered/, 'the underlying error is preserved')
+  assert.match(text, /namespace/, 'the likely conflict source is named')
+  assert.match(text, /serverName/, 'and an actionable next step is given')
+})
+
 test('a call routes to the session\'s own project connection', async () => {
   const registry = fakeRegistry()
   const aggregate = new ToolAggregate({ tools: registry, logger: silentLogger })

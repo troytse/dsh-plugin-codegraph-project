@@ -4,6 +4,40 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.4] - 2026-09-30
+
+这一版来自四轮「审查 → 修复 → 再审查」：第一轮 7 项轻微；第二轮复审打回 2 中等 + 5 轻微；第三轮确认 review 打回 1 中等（stale 不可读字段）+ 4 轻微；第四轮确认 review 打回 1 中等（测试 skip 路径泄漏子进程）+ 4 轻微。测试 **90 → 103**。
+
+### 修复
+
+**默认行为与配置（升级后可见差异）**
+
+- `cliProbe` 默认 **true → false**（改为 opt-in）：原先每次 App 启动都会执行 `npx -y <spec> version`（300s 预算，冷缓存会真的下载），与首个会话的 npx 启动争用同一个 npm 缓存。首个 CodeGraph 会话仍按需下载。想要旧行为写 `cliProbe: true`。同时补上 race 结束后**无条件 `clearTimeout`**（原先 done 先到时 deadline 定时器不清理）。
+- `telemetry` 不再默认主动开启：默认**不注入** `CODEGRAPH_TELEMETRY`，只在操作者显式配置布尔值时才下发 `'1'`/`'0'`，把偏好交回用户自己的环境（与文档「从不改变用户偏好」一致）。
+- `packageSpec` 的本地路径收紧：`file:` 与 `git+file:`（**大小写不敏感**）必须是**绝对路径**，相对路径（含 `../` 穿越）在启动即被 `validateConfig` 拒绝——该字段会让 npx 加载并执行外部代码。错误文案使用操作者**实际写的拼写**（`FILE:` / `GIT+FILE:`）。
+
+**索引探测与拒绝文案**
+
+- `locate` 的 `readdirSync` 失败原先被吞成「这里没有索引」并继续向上，可能认领**祖先项目**的索引：现在只有条目**确实不存在**才继续向上；不可读 / 断链 → `stopReason: 'index-unreadable'` 并**停止向上认领**（`lstatSync` 区分「条目不在」与「条目在但读不了」；指向真实目录的符号链接仍正常判定为已索引）。
+- **索引不可读不再被说成「没有索引」**：拒绝文案增加不可读分支，点名 `<root>/.codegraph` 与具体错误；watcher 对 `index-unreadable` 按完整错误消息**去重上报一次**；到期放弃日志带出最后错误。
+- **修好权限后拒绝文案不再撒谎**：`unreadableRoot` / `indexReadError` 原先只写不重置，权限恢复后仍逐字返回 `could not be read (EACCES…)`。现在 watcher 每个 tick 把当前 location 交给 `reconcileWaitingSessions`：仍是不可读就刷新，不再不可读就清空。滞后 ≤1 个 `pollIntervalMs`（同一 tick 内 `onTick` 先于 `onIndexed` / `onExpired`，所以挂载或放弃的瞬间不滞后）。
+  - **已知边界**（`pollMaxMs > 0` 时；默认 `0` 不受影响）：watcher 到期后不再有 tick，这两个字段不会被自动清理，会话也不会再自动发现索引。这一类现在有**专门的 `waiting-expired` 文案**——明确说「已停止观察」，并要求「建好索引后**重开**会话」（更高的 `pollMaxMs` 只对**新开会话**生效，到期后的会话不会复活观察），不再复用会误导的「几秒内可用」；README 也补了「索引实时生效以默认 `pollMaxMs: 0` 为前提」的条件说明。
+- watcher 的错误路径原先忽略 `pollMaxMs` 且每个 tick 都刷日志：现在受同一期限约束、按错误消息去重、**干净 tick 后复位**去重键。
+- `tools.register` 失败文案点名可能的**命名空间冲突**（宿主 MCP 客户端配了同名 `serverName`）并给出下一步。
+
+### 文档
+
+- README（中英）安装段补**桌面版（DSH 桌面 App）**通道：侧栏 **Plugins** 页按包名或绝对路径安装；`desktop` profile 由 App 独占、`dsh plugin --profile desktop …` 会被明确拒绝，Plugins 页才是受支持通道；两条依赖线（0.1.5 / 0.2.0）都支持及其设置通道差异。
+- 诊断表补齐不可读的原因集：`EACCES` / `EIO`、断链符号链接（`ENOENT`）、指向非目录的链接与普通文件（`ENOTDIR`），并说明都归为 `index-unreadable` 且停止向上认领。
+- 0.2.0 的 settings 说明改为**条件式**：只有当 build 仍暴露 `settings` 服务却没有 `register()` 时才会打那行日志；若完全没有该服务，该层与日志都不会出现。
+
+### 验证
+
+- `node --test test/*.test.js` **103/103**（0.1.3 为 90）。新增 `test/index.test.js` 3 条（CLI 探测超时→terminate、deadline 定时器清理、telemetry 仅在显式配置时转发），以及一条到期边界集成用例（`waiting-expired` 文案 + 到期后不再自动恢复）。
+- 两条依赖线都跑过：本地 0.1.5-rc.3 线与干净安装的 `0.2.0-rc.2` 线（CI 实际解析结果）均 **103/103、0 skipped**。
+- 每项行为修复都做了**变异验证**（在仓库外副本把修复改回旧写法，确认对应测试变红），三轮合计 20+ 处。
+- 第三方对抗式复审独立复验：两条依赖线一致、chmod 驱动的测试在 GitHub 非 root runner 上会真跑而非 skip、`#reportFailure` 的去重键不会吞掉不同错误、`index-unreadable` 的过期路径与「挂载失败重试」不冲突。
+
 ## [0.1.3] - 2026-09-30
 
 这一版全部来自一次针对 **DSH 0.2.0 桌面版**的生产就绪复审：1 个阻塞、1 个严重、7 个中等，全部修复并各自配了回归测试（79 → 90 项）。

@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { INDEX_DB_SUFFIX, INDEX_DIR, isIndexed, locateIndex, protectedHomes, protectedReason } from '../lib/locate.js'
@@ -64,6 +64,62 @@ test('the CLI installation directory shape (empty `.codegraph/`) is rejected', (
   makeIndexDir(home, ['current', 'codegraph.lock'])
   const location = locateIndex(home)
   assert.equal(location.state, 'not-a-project')
+})
+
+test('an unreadable `.codegraph/` stops the walk instead of claiming an ancestor index', (t) => {
+  // Only an ABSENT entry means "no index here, keep walking". An entry that exists but cannot
+  // be read would otherwise make this workspace silently inherit the ancestor repository's
+  // index — the wrong codebase, served confidently.
+  const outer = scratch(t)
+  makeIndexDir(outer, ['codegraph.db'])
+  const inner = join(outer, 'vendor', 'pkg')
+  mkdirSync(inner, { recursive: true })
+  const blocked = join(inner, INDEX_DIR)
+  mkdirSync(blocked)
+  chmodSync(blocked, 0o000)
+
+  let unreadable = false
+  try { readdirSync(blocked) } catch { unreadable = true }
+  if (!unreadable) {
+    chmodSync(blocked, 0o700)
+    t.skip('this environment (root, or a non-POSIX platform) cannot make a directory unreadable')
+    return
+  }
+
+  let location
+  try {
+    location = locateIndex(inner)
+  } finally {
+    // Restore access before the scratch directory is removed.
+    chmodSync(blocked, 0o700)
+  }
+  assert.equal(isIndexed(location), false, 'the ancestor index must not be claimed through an unreadable directory')
+  assert.equal(location.state, 'not-a-project')
+  assert.equal(location.stopReason, 'index-unreadable')
+  assert.equal(location.indexRoot, inner)
+  assert.match(String(location.error), /EACCES|permission/i)
+})
+
+test('a dangling `.codegraph` symlink stops the walk instead of claiming an ancestor index', (t) => {
+  // A broken link makes `readdirSync` throw ENOENT even though the entry EXISTS, so an
+  // ENOENT-only check would mistake it for "no index here" and fall through to the ancestor.
+  const outer = scratch(t)
+  makeIndexDir(outer, ['codegraph.db'])
+  const inner = join(outer, 'vendor', 'pkg')
+  mkdirSync(inner, { recursive: true })
+  const link = join(inner, INDEX_DIR)
+  try {
+    symlinkSync(join(inner, 'missing-target'), link)
+  } catch {
+    t.skip('symlinks unavailable on this platform')
+    return
+  }
+  const location = locateIndex(inner)
+  assert.equal(isIndexed(location), false, 'the ancestor index must not be claimed through a broken link')
+  assert.equal(location.state, 'not-a-project')
+  assert.equal(location.stopReason, 'index-unreadable')
+  assert.equal(location.indexRoot, inner)
+  assert.match(String(location.error), /ENOENT/i)
 })
 
 test('the walk stops at a git root instead of claiming an ancestor index', (t) => {

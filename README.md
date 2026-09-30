@@ -30,6 +30,18 @@ This plugin answers it per session instead:
 
 ## Install
 
+**DSH desktop app** — install it from the app's own **Plugins** page (sidebar → Plugins): paste the package name to pull it from npm, or an **absolute path** to install a local checkout.
+
+```
+dsh-plugin-codegraph-project
+# or a local checkout
+/path/to/dsh-plugin-codegraph-project
+```
+
+The `desktop` profile belongs to the application — `dsh plugin --profile desktop …` is refused on purpose (`profile "desktop" is managed exclusively by the Electron application`) — so the Plugins page is the supported channel there. It installs the package, appends the bundle to the profile, and the row then appears in the Settings inventory. Host-side rows load immediately; a client-side surface needs one page refresh before it shows up.
+
+**CLI profiles (`dsh web`, TUI, headless)** — install into that profile by name, or link a checkout:
+
 ```sh
 # from npm
 dsh plugin --profile web add dsh-plugin-codegraph-project
@@ -41,6 +53,11 @@ dsh plugin --profile web add link:/path/to/dsh-plugin-codegraph-project
 Restart the profile afterwards (`dsh web`). The package ships a bundle patch, so it inserts
 its own row without any composition edit. Requires Node.js 20 or newer, together with a DSH
 deployment that provides `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-tools`.
+
+Both dependency lines are supported: on the **0.1.5** line a host settings namespace layers a user
+override over this row, while on the **0.2.0** line that namespace cannot be registered at all —
+0.2.0 removed plugin-registered settings namespaces — so the row's `config` is the only settings
+channel (the plugin logs one line saying so; see [Configuration](#configuration)).
 
 Nothing else is needed: the server is fetched through `npx` into a plugin-owned cache, so
 there is no global CodeGraph install to manage.
@@ -56,7 +73,8 @@ npx -y @colbymchenry/codegraph@1.6.0 init -y -- /path/to/project
 
 That creates `.codegraph/codegraph.db` (and nothing else in your source tree). Do it while a
 session is open and the session picks the tools up within a few seconds; do it before and the
-session simply starts with them.
+session simply starts with them. (This live pickup holds with the default `pollMaxMs: 0`; if you
+set a positive `pollMaxMs`, an index created after that limit needs the session reopened.)
 
 `codegraph uninit -- /path/to/project` removes it again.
 
@@ -74,14 +92,14 @@ Set these on the plugin row in your profile's `cordis.patch.yml` (or wherever th
 | --- | --- | --- |
 | `enabled` | `true` | Master switch. When false, nothing is spawned and no tool is registered. |
 | `version` | `'1.6.0'` | **The global CodeGraph version**, passed to npx as `@colbymchenry/codegraph@<version>`. The default is the release this plugin was verified against. |
-| `packageSpec` | `''` | Escape hatch: a complete package spec that wins over `version` (mirror, private registry, `file:` tarball). |
+| `packageSpec` | `''` | Escape hatch: a complete package spec that wins over `version` (mirror, private registry, `file:` tarball). **npx loads and executes whatever this points at**, so a local `file:`/`git+file:` spec must be an absolute path. |
 | `cacheDir` | `''` → `~/.dsh/codegraph/npm-cache` | npm cache used by npx, created if missing. Set it if DSH's `~/.npm` is not writable. |
 | `serverName` | `'codegraph'` | MCP namespace; the model-facing name is `mcp__<serverName>__codegraph_explore`. |
 | `toolCallTimeoutMs` | `60000` | Per-call timeout for one CodeGraph query. |
 | `pollIntervalMs` | `3000` | How often an unindexed workspace is re-checked for a new index. |
 | `pollMaxMs` | `0` | Stop watching an unindexed workspace after this long. `0` watches for the session's life. |
-| `telemetry` | `true` | Forwards your preference through `CODEGRAPH_TELEMETRY`; this plugin never changes it. |
-| `cliProbe` | `true` | Run `npx … version` once at startup and log the outcome. Diagnostics only. |
+| `telemetry` | unset | Forward an **explicit** preference as `CODEGRAPH_TELEMETRY` (`true` → `1`, `false` → `0`). Unset injects nothing, so CodeGraph reads your own environment; the plugin never switches telemetry on or off on its own. |
+| `cliProbe` | `false` | Run `npx … version` once at startup and log the outcome; it also warms the npx cache. **Off by default**: it runs on every app start even when CodeGraph is never used, and with a cold cache it downloads the bundle while the first session's own launch races for the same cache. Opt in when the diagnostic is worth that cost. |
 | `usageGuidance` | `true` | Add a short CodeGraph section to the prompt of mounted sessions only. |
 | `diagnosticTool` | `false` | Register a `codegraph_project_status` tool reporting this session's state. |
 | `allowHomeProject` | `false` | Serve an index that **is** the home directory (or the filesystem root). The plugin's equivalent of the CLI's `--force`; an index nested in a home directory is always served. |
@@ -93,9 +111,10 @@ settings edit is refused and the row configuration stays in force. `enabled` is 
 of that layer: the row configuration's `enabled` is honored by the loader before the plugin runs, while a
 settings-layer switch could only ever be read once at activation — it could not turn a running plugin off.
 
-> **DSH 0.2.0 and later** no longer serve plugin-registered settings namespaces (`settings` exposes no
-> `register()`), so this layer is not offered there and the plugin logs one line saying so instead of
-> ignoring it silently. Configure the row instead — the same keys, in the profile's `cordis.patch.yml`,
+> **DSH 0.2.0 and later** no longer serve plugin-registered settings namespaces. When a build still
+> exposes a `settings` service but it has no `register()`, the plugin logs one line saying so instead of
+> ignoring the layer silently. (If a build serves no `settings` service at all, neither the namespace nor
+> that line appears.) Configure the row instead — the same keys, in the profile's `cordis.patch.yml`,
 > which is the channel 0.2.0 uses for every plugin's settings.
 
 ### Changing the version
@@ -143,8 +162,8 @@ a grep/read loop. A session without an index gets no such section.
   project nested under `$HOME` (`~/work/api`) still gets served by its own index. Set
   `allowHomeProject: true` for the plugin's equivalent of that `--force`.
 - **One request may precede the connection.** A session's tool list is assembled when a model
-  request starts, and connecting a project takes about two seconds (faster with `cliProbe`
-  having warmed the cache). In an interactive session that means the tool is there before you
+  request starts, and connecting a project takes about two seconds (faster when the optional
+  `cliProbe` has warmed the cache). In an interactive session that means the tool is there before you
   have finished typing; a session driven programmatically may need to wait for the mount before
   its first prompt. The plugin logs one line per project mount naming the pid and tools.
 - **Upward resolution.** A monorepo session in `packages/app` is served by the repository
@@ -157,7 +176,8 @@ a grep/read loop. A session without an index gets no such section.
   a failure during that reconnect is reported as a tool error rather than a silent success.
 - **Cold start.** The first use of a version downloads the platform bundle (tens of
   megabytes). Sessions are never blocked by it — the tools appear when the connection is
-  ready. `cliProbe` warms the same cache at startup.
+  ready. Set `cliProbe: true` to warm the same cache at startup; it is off by default so a
+  fresh app start does not pay for (or race the first session over) a download nobody asked for.
 
 ### Per-session tool lists (a platform limitation)
 
@@ -202,6 +222,8 @@ signals are the backstop for a wedged server.
 | Log: `could not resolve an npm launcher` | `npx` is not on the harness's `PATH`. Start DSH from a shell that has Node, or set `packageSpec` to a spec npx can still reach. |
 | Log: `could not create the npx cache directory` | `cacheDir` is not writable. Point it somewhere writable. |
 | Log: a `manifest`/download error | npm could not fetch the bundle (offline, mirror without platform packages, private registry). Set `packageSpec` to a reachable spec. |
+| Log: `cannot read <root>/.codegraph` | A `.codegraph` entry exists but is not a readable directory: `EACCES`/`EIO` on it, a broken symlink (`ENOENT`), a symlink to a non-directory, or a plain file (`ENOTDIR`). The plugin stops the upward walk rather than serving an ancestor project's index. Fix the permissions or the link and the watcher picks it up. |
+| Log: `could not register mcp__<serverName>__…` | **Usually** another MCP server already owns that namespace (an invalid `serverName` can also fail registration), so this plugin would silently lose all its tools. Give the `codegraph-project` row a distinct `serverName` (or remove the conflicting server) and restart the session. |
 | Tool call: "the MCP server is not responding" | The server crashed and the reconnect attempt failed. The log carries the captured stderr tail. |
 | Session still on an old version | Sessions keep the version they connected with. Reopen the session. |
 | A private registry needs credentials | The harness scrubs credentials out of child environments. Use a cache directory pre-populated with the package, or a `file:`/tarball `packageSpec`. |
