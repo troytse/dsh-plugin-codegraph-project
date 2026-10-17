@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-codegraph-project",
-  "version": "0.1.4",
-  "description": "Project-scoped CodeGraph for DeepSeek Harness: launches codegraph's MCP server through npx, shares one instance per project root across sessions, selects the global codegraph version, and injects its tools only into workspaces that actually have an index — including workspaces initialized mid-session.",
+  "version": "0.1.5",
+  "description": "Project-scoped CodeGraph for DeepSeek Harness: launches codegraph's MCP server through npx, shares one instance per project root across sessions, selects the global codegraph version, and injects its tools only into workspaces that actually have an index \u2014 including workspaces initialized mid-session.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -34,12 +34,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-subprocess": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
-    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
+    "@deepseek-ai/dsh-subprocess": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0"
   },
   "engines": {
     "node": ">=20",
-    "dsh": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
+    "dsh": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0 <0.2.1-0 || >=0.2.1-rc.1 <0.3.0-0"
   },
   "keywords": [
     "dsh",
@@ -60,7 +60,10 @@
   },
   "homepage": "https://github.com/troytse/dsh-plugin-codegraph-project",
   "devDependencies": {
-    "@deepseek-ai/dsh-scope": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0",
-    "@deepseek-ai/dsh-system-prompt": ">=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0"
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2"
   }
 }

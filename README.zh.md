@@ -52,7 +52,7 @@ dsh plugin --profile web add link:/path/to/dsh-plugin-codegraph-project
 需要 Node.js 20 或更高版本，并且 DSH 部署提供 `@deepseek-ai/dsh-subprocess` 与
 `@deepseek-ai/dsh-tools`。
 
-**两条依赖线都支持**：**0.1.5** 线上由宿主 settings namespace 在本行之上叠一层用户覆盖；**0.2.0** 线上该 namespace 根本注册不了——0.2.0 移除了插件可注册的设置命名空间——本行的 `config` 是唯一设置通道（插件会打一行日志说明，见[配置](#配置)）。
+**两条依赖线都支持**：**0.1.5** 线上由宿主 settings namespace 在本行之上叠一层用户覆盖；**0.2.0** 及以后该 namespace 根本注册不了——0.2.0 移除了插件可注册的设置命名空间——本行的 `config` 是唯一设置通道（插件会打一行日志说明，见[配置](#配置)）。插件在 **0.2.1-rc.2** 与 0.2.0、0.1.5 两条线上均通过测试。
 
 除此之外不需要任何准备：服务通过 `npx` 拉到一个由本插件管理的缓存目录，不需要全局安装 CodeGraph。
 

@@ -55,9 +55,10 @@ its own row without any composition edit. Requires Node.js 20 or newer, together
 deployment that provides `@deepseek-ai/dsh-subprocess` and `@deepseek-ai/dsh-tools`.
 
 Both dependency lines are supported: on the **0.1.5** line a host settings namespace layers a user
-override over this row, while on the **0.2.0** line that namespace cannot be registered at all —
-0.2.0 removed plugin-registered settings namespaces — so the row's `config` is the only settings
-channel (the plugin logs one line saying so; see [Configuration](#configuration)).
+override over this row, while from the **0.2.0** line onward that namespace cannot be registered at
+all — 0.2.0 removed plugin-registered settings namespaces — so the row's `config` is the only
+settings channel (the plugin logs one line saying so; see [Configuration](#configuration)).
+The plugin is tested on **0.2.1-rc.2** as well as on the 0.2.0 and 0.1.5 lines.
 
 Nothing else is needed: the server is fetched through `npx` into a plugin-owned cache, so
 there is no global CodeGraph install to manage.

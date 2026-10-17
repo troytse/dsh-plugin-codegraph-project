@@ -4,6 +4,18 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.5] - 2026-10-18
+
+### 修复
+
+- **兼容 DSH 0.2.1**：`engines.dsh` 与 `@deepseek-ai/dsh-subprocess` / `@deepseek-ai/dsh-tools` 的 peer 范围原先写作 `>=0.1.5-rc.2 <0.2.0-0 || >=0.2.0-0`，按 semver 的预发布规则并不匹配 `0.2.1-rc.2`（`>=0.2.0-0` 只覆盖 0.2.0 这一预发布元组）。补上 `>=0.2.1-rc.1 <0.3.0-0` 线，0.1.5 / 0.2.0 / 0.2.1 三条线都继续被接受。
+- **测试不再借用外部依赖副本**：devDependencies 固定到 `0.2.1-rc.2` 并在仓库内本地安装（`@deepseek-ai/cordis`、`dsh-tools`、`dsh-subprocess`、`dsh-scope`、`dsh-system-prompt`）。此前的 `node_modules` 软链指向 `~/.dsh/profiles/node_modules` 的 0.2.0 副本，其中 `@modelcontextprotocol/sdk` 的软链已随 npx 缓存清理而悬空，导致插件无法 import、3 个测试文件直接 `ERR_MODULE_NOT_FOUND`。
+
+### 验证
+
+- DSH `0.2.1-rc.2` 依赖线下 `node --test test/*.test.js` **103/103**（此前 71 通过、3 个文件因缺失依赖失败）。
+- `npm run lint`（`node --check` + Node 20 兼容性检查）通过。
+
 ## [0.1.4] - 2026-09-30
 
 这一版来自四轮「审查 → 修复 → 再审查」：第一轮 7 项轻微；第二轮复审打回 2 中等 + 5 轻微；第三轮确认 review 打回 1 中等（stale 不可读字段）+ 4 轻微；第四轮确认 review 打回 1 中等（测试 skip 路径泄漏子进程）+ 4 轻微。测试 **90 → 103**。
